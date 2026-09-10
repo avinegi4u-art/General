@@ -52,6 +52,11 @@ def test_mudguard_is_not_plausible_for_scooter_query() -> None:
     query = "vsett 10+ scooter"
     assert hit_is_plausible(query, "VSETT 10+ Electric Scooter 60V")
     assert hit_is_plausible(query, "VSETT 10 Electric Scooter Max Speed 80 kmh")
+    assert hit_is_plausible(
+        query,
+        "VSETT Electric Scooter",
+        url="http://www.vsett.com/product/5.html",
+    )
     assert not hit_is_plausible(
         query, "LHAIQQ Universal Mudguard Compatible with VSETT 10+ MUKUTA 10"
     )
@@ -61,6 +66,10 @@ def test_mudguard_is_not_plausible_for_scooter_query() -> None:
         url="https://www.whizz.ae/product/electric-scooter-disc-brake-rotor-for-vsett-10-replacement-parts",
     )
     assert accessory_multiplier(query, "ZAPYVET For VSETT, 10+ Spare Steering Damper") < 0.5
+    assert accessory_multiplier(
+        query,
+        "Guidão de borracha antiderrapante, extensões de peça para vsett 10 plus",
+    ) < 0.5
 
 
 def test_relevance_prefers_the_scooter_over_parts() -> None:

@@ -519,6 +519,17 @@ def search_web(query: str, config: AppConfig) -> list[SearchResult]:
         logger.warning("marketplace searches failed: %s", exc)
 
     unique = _merge_hits([hits, extra])
+    if len(unique) < 8:
+        try:
+            logger.info("Few hits; retrying with the original query %r", query)
+            retry = backend.search(
+                localize_query(query, country),
+                max(config.max_results, 8),
+            )
+            unique = _merge_hits([unique, retry])
+        except Exception as retry_exc:  # noqa: BLE001
+            logger.warning("fallback search failed: %s", retry_exc)
+
     unique.sort(
         key=lambda hit: (
             not hit_is_plausible(query, hit.title, hit.snippet, hit.url),
@@ -529,11 +540,6 @@ def search_web(query: str, config: AppConfig) -> list[SearchResult]:
             not looks_like_product_url(hit.url),
         )
     )
-    plausible = [
-        hit for hit in unique if hit_is_plausible(query, hit.title, hit.snippet, hit.url)
-    ]
-    if len(plausible) >= 4:
-        unique = plausible
     buyable_n = sum(
         1
         for hit in unique

@@ -122,6 +122,10 @@ ACCESSORY_TERMS = frozenset(
         "pad",
         "grip",
         "grips",
+        "handlebar",
+        "handlebars",
+        "peca",
+        "pieza",
         "bell",
         "mirror",
         "sticker",
@@ -222,7 +226,9 @@ def accessory_multiplier(query: str, title: str) -> float:
     brands = required_terms(query)
     if brands:
         brand = re.escape(brands[0])
-        if re.search(rf"\bfor\s+{brand}\b", title_l) and not title_l.strip().startswith(brands[0]):
+        if re.search(rf"\b(?:for|para|für|pour)\s+{brand}\b", title_l) and not title_l.strip().startswith(
+            brands[0]
+        ):
             return 0.14
     return 1.0
 
@@ -245,10 +251,16 @@ def precise_search_query(query: str) -> str:
 
 
 def hit_is_plausible(query: str, title: str, snippet: str = "", url: str = "") -> bool:
-    """Cheap pre-scrape check: required terms present and not an off-query spare."""
+    """Cheap pre-scrape check: brand present and not an obvious spare part.
+
+    Plus-models such as ``10+`` are optional here so official pages like
+    ``vsett.com/product/5`` are not dropped before we can read the title.
+    """
     slug = url.replace("-", " ").replace("/", " ").replace("_", " ")
     blob = f"{title} {snippet} {slug}"
-    if missing_required(query, f"{title} {snippet}") and missing_required(query, blob):
+    missing = missing_required(query, blob)
+    missing_brand = [term for term in missing if not term.endswith("+")]
+    if missing_brand:
         return False
     if accessory_multiplier(query, f"{title} {slug}") < 0.5:
         return False
