@@ -89,8 +89,26 @@ class ProductItem:
 
 
 @dataclass
+class LabeledPick:
+    """One of the top answers shown in the UI or CLI table."""
+
+    key: str
+    label: str
+    blurb: str
+    item: Optional[ProductItem] = None
+
+    def to_dict(self, base_currency: str = "AED") -> dict[str, Any]:
+        return {
+            "id": self.key,
+            "label": self.label,
+            "blurb": self.blurb,
+            "item": self.item.to_dict(base_currency) if self.item else None,
+        }
+
+
+@dataclass
 class RankedPicks:
-    """The three category winners plus the full scored catalogue."""
+    """The top answers plus the full scored catalogue."""
 
     query: str
     base_currency: str
@@ -98,6 +116,9 @@ class RankedPicks:
     best_price: Optional[ProductItem] = None
     best_overall: Optional[ProductItem] = None
     best_value: Optional[ProductItem] = None
+    best_rated: Optional[ProductItem] = None
+    also_consider: Optional[ProductItem] = None
+    answers: list[LabeledPick] = field(default_factory=list)
     weights: dict[str, float] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
@@ -115,6 +136,9 @@ class RankedPicks:
                 "best_price": item_or_none(self.best_price),
                 "best_overall": item_or_none(self.best_overall),
                 "best_value": item_or_none(self.best_value),
+                "best_rated": item_or_none(self.best_rated),
+                "also_consider": item_or_none(self.also_consider),
             },
+            "answers": [pick.to_dict(self.base_currency) for pick in self.answers],
             "items": [item.to_dict(self.base_currency) for item in self.items],
         }

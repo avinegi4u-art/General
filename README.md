@@ -1,10 +1,12 @@
 # Product Finder
 
-Search the web for a product and get **three ranked picks**:
+Search the web for a product and get **five ranked picks**:
 
 - **Best price** — lowest effective price among reasonably relevant items
 - **Best match** — highest combined score of relevance + price + rating
 - **Best value** — strongest quality-per-price heuristic
+- **Best rated** — highest rating among relevant matches
+- **Also consider** — next strongest overall listing (so you always get five answers when enough pages were found)
 
 Use the **web app** for a search box, or the CLI if you prefer the terminal.
 
@@ -100,7 +102,7 @@ Scraping is polite: configurable timeouts/retries, random delays between request
 
 | File | Role |
 | --- | --- |
-| `app.py` | Web app (search box + three ranked cards) |
+| `app.py` | Web app (search box + five ranked cards) |
 | `main.py` | CLI (`argparse`), table + JSON output |
 | `search.py` | Search backends (`everywhere` merges multiple engines) |
 | `scraper.py` | HTTP fetch + HTML / price / rating parsing |

@@ -24,7 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="product-finder",
         description=(
             "Search the web for products matching a query, scrape listing pages, "
-            "and rank Best price / Best overall match / Best value."
+            "and rank the top 5: Best price, Best match, Best value, Best rated, Also consider."
         ),
     )
     parser.add_argument("--query", "-q", required=True, help="Natural-language product query.")
@@ -119,13 +119,18 @@ def _truncate(text: str, width: int) -> str:
 
 
 def format_table(picks: RankedPicks) -> str:
-    """Pretty-print the three category winners as a terminal table."""
+    """Pretty-print the top answers as a terminal table."""
     rows = []
-    categories = (
-        ("Best price", picks.best_price),
-        ("Best overall match", picks.best_overall),
-        ("Best value", picks.best_value),
-    )
+    if picks.answers:
+        categories = [(pick.label, pick.item) for pick in picks.answers]
+    else:
+        categories = (
+            ("Best price", picks.best_price),
+            ("Best overall match", picks.best_overall),
+            ("Best value", picks.best_value),
+            ("Best rated", picks.best_rated),
+            ("Also consider", picks.also_consider),
+        )
     for label, item in categories:
         if item is None:
             rows.append([label, "—", "—", "—", "—", "—", "—"])
@@ -232,11 +237,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if emit_table:
         print(format_table(picks))
         print()
-        for label, item in (
-            ("Best price", picks.best_price),
-            ("Best overall match", picks.best_overall),
-            ("Best value", picks.best_value),
-        ):
+        if picks.answers:
+            url_rows = [(pick.label, pick.item) for pick in picks.answers]
+        else:
+            url_rows = (
+                ("Best price", picks.best_price),
+                ("Best overall match", picks.best_overall),
+                ("Best value", picks.best_value),
+                ("Best rated", picks.best_rated),
+                ("Also consider", picks.also_consider),
+            )
+        for label, item in url_rows:
             if item:
                 print(f"{label} URL: {item.url}")
     if emit_json:

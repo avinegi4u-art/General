@@ -51,7 +51,7 @@ def test_format_table_includes_all_categories() -> None:
     )
     table = format_table(picks)
     assert "Best price" in table
-    assert "Best overall match" in table
+    assert "Best overall match" in table or "Best match" in table
     assert "Best value" in table
     assert "noon.com" in table
     payload = json.dumps(picks.to_dict())

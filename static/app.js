@@ -104,7 +104,7 @@ async function runSearch(query) {
       body: JSON.stringify({
         query,
         base_currency: currencySelect.value,
-        max_pages: 6,
+        max_pages: 8,
       }),
     });
     const data = await response.json();

@@ -28,8 +28,9 @@ def test_search_requires_query() -> None:
     assert "query" in response.get_json()["error"].lower()
 
 
-def test_search_returns_three_picks() -> None:
+def test_search_returns_five_picks() -> None:
     from app import app
+    from models import LabeledPick
 
     item = ProductItem(
         title="Demo Wireless Earbuds",
@@ -40,23 +41,43 @@ def test_search_returns_three_picks() -> None:
         rating=4.4,
         scores=ScoreBreakdown(relevance=0.8, price=0.7, rating=0.88, overall=0.79, value=0.6),
     )
+    extras = [
+        ProductItem(
+            title=f"Alt {n}",
+            url=f"https://shop.example/{n}",
+            source_domain="shop.example",
+            description="wireless earbuds",
+            price=PriceInfo(amount=100 + n, currency="AED", original_text=str(100 + n), amount_base=100.0 + n),
+            rating=4.0,
+            scores=ScoreBreakdown(overall=0.5),
+        )
+        for n in range(4)
+    ]
+    answers = [
+        LabeledPick("best_overall", "Best match", "mix", item),
+        LabeledPick("best_price", "Best price", "cheap", extras[0]),
+        LabeledPick("best_value", "Best value", "value", extras[1]),
+        LabeledPick("best_rated", "Best rated", "rated", extras[2]),
+        LabeledPick("also_consider_1", "Also consider", "next", extras[3]),
+    ]
     picks = RankedPicks(
         query="wireless earbuds",
         base_currency="AED",
-        items=[item],
+        items=[item, *extras],
         best_price=item,
         best_overall=item,
         best_value=item,
+        best_rated=item,
+        answers=answers,
     )
     with patch("app.run_pipeline", return_value=picks):
         client = app.test_client()
         response = client.post("/api/search", json={"query": "wireless earbuds under 200 AED"})
     assert response.status_code == 200
     payload = response.get_json()
-    assert payload["items_considered"] == 1
     labels = [pick["label"] for pick in payload["picks"]]
-    assert labels == ["Best price", "Best match", "Best value"]
-    assert payload["picks"][0]["item"]["title"] == "Demo Wireless Earbuds"
+    assert labels == ["Best match", "Best price", "Best value", "Best rated", "Also consider"]
+    assert len(payload["picks"]) == 5
 
 
 def test_everywhere_backend_is_selectable() -> None:

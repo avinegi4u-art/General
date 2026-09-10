@@ -101,3 +101,21 @@ def test_json_payload_contains_categories() -> None:
     assert "best_overall" in payload["categories"]
     assert "best_value" in payload["categories"]
     assert payload["categories"]["best_price"]["price"]["amount"] == 100
+    assert "best_rated" in payload["categories"]
+    assert "also_consider" in payload["categories"]
+    assert 1 <= len(payload["answers"]) <= 5
+
+
+def test_rank_items_returns_five_distinct_answers() -> None:
+    config = AppConfig()
+    items = [
+        _item(f"Wireless Earbuds {n}", f"https://shop.example/{n}", "shop.example", 80 + n * 20, 3.5 + n * 0.3, "wireless earbuds")
+        for n in range(6)
+    ]
+    picks = rank_items(items, "wireless earbuds", config)
+    assert len(picks.answers) == 5
+    urls = [pick.item.url for pick in picks.answers if pick.item]
+    assert len(urls) == len(set(urls))
+    labels = [pick.label for pick in picks.answers]
+    assert "Best match" in labels
+    assert "Best price" in labels

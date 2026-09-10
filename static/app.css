@@ -8,6 +8,8 @@
   --price: #0f6e5b;
   --match: #c44b16;
   --value: #6b4c1e;
+  --rated: #3d5a80;
+  --also: #7a5c3a;
   --shadow: 0 18px 40px rgba(40, 24, 8, 0.08);
 }
 
@@ -32,7 +34,7 @@ body {
 }
 
 .page {
-  width: min(1080px, calc(100% - 32px));
+  width: min(1180px, calc(100% - 32px));
   margin: 0 auto;
   padding: 48px 0 80px;
 }
@@ -183,7 +185,7 @@ select {
 
 .picks {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 16px;
   margin-top: 28px;
 }
@@ -203,6 +205,9 @@ select {
 .card.best_price { border-top: 5px solid var(--price); }
 .card.best_overall { border-top: 5px solid var(--match); }
 .card.best_value { border-top: 5px solid var(--value); }
+.card.best_rated { border-top: 5px solid var(--rated); }
+.card.also_consider,
+.card[class*="also_consider"] { border-top: 5px solid var(--also); }
 
 .badge {
   font-size: 0.75rem;
@@ -214,6 +219,9 @@ select {
 .card.best_price .badge { color: var(--price); }
 .card.best_overall .badge { color: var(--match); }
 .card.best_value .badge { color: var(--value); }
+.card.best_rated .badge { color: var(--rated); }
+.card.also_consider .badge,
+.card[class*="also_consider"] .badge { color: var(--also); }
 
 .card h3 {
   font-family: Georgia, serif;
@@ -271,7 +279,7 @@ select {
 }
 
 footer {
-  width: min(1080px, calc(100% - 32px));
+  width: min(1180px, calc(100% - 32px));
   margin: 0 auto 32px;
   color: var(--muted);
   font-size: 0.85rem;
@@ -283,6 +291,12 @@ footer {
   height: 1px;
   overflow: hidden;
   clip: rect(0 0 0 0);
+}
+
+@media (max-width: 1100px) {
+  .picks {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 860px) {

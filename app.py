@@ -1,4 +1,4 @@
-"""Flask web app: search the web and show the three best product picks."""
+"""Flask web app: search the web and show the five best product picks."""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ def web_config(query: str, base_currency: str, max_pages: int) -> AppConfig:
     config.search_backend = os.getenv("SEARCH_BACKEND", "everywhere")
     config.base_currency = base_currency
     config.max_pages = max_pages
-    config.max_results = max(max_pages + 4, 10)
+    config.max_results = max(max_pages + 4, 12)
     config.min_delay_s = min(config.min_delay_s, 0.25)
     config.max_delay_s = min(config.max_delay_s, 0.7)
     config.search_region = infer_region(query, config.search_region)
@@ -59,17 +59,22 @@ def web_config(query: str, base_currency: str, max_pages: int) -> AppConfig:
 
 def _card_payload(picks_dict: dict[str, Any]) -> dict[str, Any]:
     """Shape API JSON for the frontend cards."""
-    cats = picks_dict.get("categories") or {}
+    answers = picks_dict.get("answers") or []
+    if not answers:
+        cats = picks_dict.get("categories") or {}
+        answers = [
+            {"id": "best_price", "label": "Best price", "blurb": "Lowest price among relevant matches", "item": cats.get("best_price")},
+            {"id": "best_overall", "label": "Best match", "blurb": "Strongest mix of relevance, price, and rating", "item": cats.get("best_overall")},
+            {"id": "best_value", "label": "Best value", "blurb": "Quality relative to what you pay", "item": cats.get("best_value")},
+            {"id": "best_rated", "label": "Best rated", "blurb": "Highest rating among relevant matches", "item": cats.get("best_rated")},
+            {"id": "also_consider", "label": "Also consider", "blurb": "Next strongest overall match", "item": cats.get("also_consider")},
+        ]
     return {
         "query": picks_dict.get("query"),
         "base_currency": picks_dict.get("base_currency"),
         "items_considered": picks_dict.get("items_considered", 0),
         "notes": picks_dict.get("notes") or [],
-        "picks": [
-            {"id": "best_price", "label": "Best price", "blurb": "Lowest price among relevant matches", "item": cats.get("best_price")},
-            {"id": "best_overall", "label": "Best match", "blurb": "Strongest mix of relevance, price, and rating", "item": cats.get("best_overall")},
-            {"id": "best_value", "label": "Best value", "blurb": "Quality relative to what you pay", "item": cats.get("best_value")},
-        ],
+        "picks": answers,
         "items": picks_dict.get("items") or [],
     }
 
@@ -98,10 +103,10 @@ def api_search() -> Any:
         return jsonify({"error": f"Unsupported currency {currency}."}), 400
 
     try:
-        max_pages = int(payload.get("max_pages") or 6)
+        max_pages = int(payload.get("max_pages") or 8)
     except (TypeError, ValueError):
         max_pages = 6
-    max_pages = max(3, min(max_pages, 10))
+    max_pages = max(5, min(max_pages, 12))
 
     config = web_config(query, currency, max_pages)
     logger.info("Web search query=%r currency=%s backend=%s", query, currency, config.search_backend)

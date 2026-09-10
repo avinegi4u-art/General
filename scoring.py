@@ -8,7 +8,7 @@ from statistics import median
 from typing import Optional
 
 from config import AppConfig, ScoreWeights, convert_to_base
-from models import ProductItem, RankedPicks, ScoreBreakdown
+from models import LabeledPick, ProductItem, RankedPicks, ScoreBreakdown
 
 STOPWORDS = frozenset(
     {
@@ -213,11 +213,11 @@ def rank_items(
     config: AppConfig,
     weights: ScoreWeights | None = None,
 ) -> RankedPicks:
-    """Score items and pick Best price, Best overall match, and Best value.
+    """Score items and return the top answers (default five).
 
-    Categories are independent, so one product may win more than one of them.
-    That keeps “Best price” honest even when the cheapest item is also the
-    strongest overall match.
+    Category winners (price / match / value / rated) are chosen independently so
+    “Best price” stays the cheapest relevant listing. The displayed answer list
+    then prefers distinct URLs, filling leftover slots from the overall ranking.
     """
     weights = (weights or config.weights).normalized()
     scored = apply_scores(items, query, config, weights)
@@ -245,13 +245,29 @@ def rank_items(
     if not value_pool:
         value_pool = [item for item in scored if item.price_base is not None]
 
+    rated_pool = [
+        item
+        for item in scored
+        if item.scores.relevance >= config.min_relevance_for_value
+    ] or scored
+
     overall_sorted = sorted(scored, key=lambda i: i.scores.overall, reverse=True)
     price_sorted = sorted(priced_relevant, key=lambda i: (i.price_base or math.inf, -i.scores.overall))
     value_sorted = sorted(value_pool, key=lambda i: i.scores.value, reverse=True)
+    rated_sorted = sorted(
+        rated_pool,
+        key=lambda i: (
+            i.rating_is_default,
+            -(i.rating or 0.0),
+            -(i.review_count or 0),
+            -i.scores.overall,
+        ),
+    )
 
     best_overall = overall_sorted[0] if overall_sorted else None
     best_price = price_sorted[0] if price_sorted else None
     best_value = value_sorted[0] if value_sorted else None
+    best_rated = rated_sorted[0] if rated_sorted else None
 
     if best_price is None:
         notes.append("No prices could be parsed; Best price is empty.")
@@ -260,13 +276,25 @@ def rank_items(
     if not scored:
         notes.append("No search results were scraped.")
 
+    answers = _build_answers(
+        limit=config.top_answers,
+        overall_sorted=overall_sorted,
+        price_sorted=price_sorted,
+        value_sorted=value_sorted,
+        rated_sorted=rated_sorted,
+    )
+    also_consider = next((pick.item for pick in answers if pick.key.startswith("also")), None)
+
     return RankedPicks(
         query=query,
         base_currency=config.base_currency,
-        items=sorted(scored, key=lambda i: i.scores.overall, reverse=True),
+        items=overall_sorted,
         best_price=best_price,
         best_overall=best_overall,
         best_value=best_value,
+        best_rated=best_rated,
+        also_consider=also_consider,
+        answers=answers,
         weights={
             "relevance": weights.relevance,
             "price": weights.price,
@@ -274,3 +302,40 @@ def rank_items(
         },
         notes=notes,
     )
+
+
+def _build_answers(
+    limit: int,
+    overall_sorted: list[ProductItem],
+    price_sorted: list[ProductItem],
+    value_sorted: list[ProductItem],
+    rated_sorted: list[ProductItem],
+) -> list[LabeledPick]:
+    """Build up to ``limit`` distinct answers, one per category then fillers."""
+    used: set[str] = set()
+    answers: list[LabeledPick] = []
+
+    def first_unused(pool: list[ProductItem]) -> Optional[ProductItem]:
+        for item in pool:
+            if item.url not in used:
+                return item
+        return None
+
+    def add(key: str, label: str, blurb: str, item: Optional[ProductItem]) -> None:
+        if item is None or item.url in used or len(answers) >= limit:
+            return
+        used.add(item.url)
+        answers.append(LabeledPick(key=key, label=label, blurb=blurb, item=item))
+
+    add("best_overall", "Best match", "Strongest mix of relevance, price, and rating", first_unused(overall_sorted))
+    add("best_price", "Best price", "Lowest price among relevant matches", first_unused(price_sorted))
+    add("best_value", "Best value", "Quality relative to what you pay", first_unused(value_sorted))
+    add("best_rated", "Best rated", "Highest rating among relevant matches", first_unused(rated_sorted))
+
+    extra_n = 1
+    for item in overall_sorted:
+        if len(answers) >= limit:
+            break
+        add(f"also_consider_{extra_n}", "Also consider", "Next strongest overall match", item)
+        extra_n += 1
+    return answers

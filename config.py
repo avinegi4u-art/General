@@ -142,6 +142,7 @@ class AppConfig:
     rating_scale: float = 5.0
     min_relevance_for_price: float = 0.25
     min_relevance_for_value: float = 0.20
+    top_answers: int = 5
     serpapi_url: str = "https://serpapi.com/search.json"
     google_cse_url: str = "https://www.googleapis.com/customsearch/v1"
 
