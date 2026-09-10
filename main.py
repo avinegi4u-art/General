@@ -71,12 +71,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def configure_logging(verbose: bool) -> None:
-    level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
-        level=level,
+        level=logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
         stream=sys.stderr,
     )
+    logging.getLogger("primp").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    if verbose:
+        for name in ("search", "scraper", "scoring", "main"):
+            logging.getLogger(name).setLevel(logging.DEBUG)
 
 
 def apply_cli_overrides(config: AppConfig, args: argparse.Namespace) -> AppConfig:

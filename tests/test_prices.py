@@ -36,6 +36,21 @@ def test_parse_price_symbol_after_amount() -> None:
     assert price.amount == 89.0
 
 
+def test_parse_price_ignores_under_budget_phrase() -> None:
+    assert parse_price("Best wireless earbuds under 200 AED in the UAE") is None
+    priced = parse_price("Sale AED 149 — wireless earbuds under 200 AED")
+    assert priced is not None
+    assert priced.amount == 149
+
+
+def test_parse_price_rejects_years_and_crumbs() -> None:
+    assert parse_price("Best earbuds in 2025 AUD guide") is None
+    assert parse_price("Shipping AED 6.08") is None
+    kept = parse_price("Now AED 129 at checkout")
+    assert kept is not None
+    assert kept.amount == 129
+
+
 def test_fx_unknown_currency_passthrough() -> None:
     assert convert_to_base(10.0, "XYZ", "AED") == 10.0
 

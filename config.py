@@ -66,12 +66,41 @@ SKIP_DOMAINS: frozenset[str] = frozenset(
         "pinterest.com",
         "linkedin.com",
         "wikipedia.org",
+        "glarity.app",
+        "perplexity.ai",
+        "chatgpt.com",
+        "openai.com",
     }
 )
 
 SKIP_EXTENSIONS: frozenset[str] = frozenset(
     {".pdf", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".mp4", ".zip"}
 )
+
+PRODUCT_PATH_HINTS: tuple[str, ...] = (
+    "/dp/",
+    "/gp/product",
+    "/p/",
+    "/product",
+    "/prd/",
+    "/pd/",
+    "/ip/",
+    "/itm",
+    "/item",
+)
+
+# Drop extracted amounts that are almost certainly years, ratings, or shipping crumbs.
+PLAUSIBLE_PRICE_RANGE: dict[str, tuple[float, float]] = {
+    "AED": (15.0, 200_000.0),
+    "USD": (5.0, 100_000.0),
+    "EUR": (5.0, 100_000.0),
+    "GBP": (5.0, 100_000.0),
+    "INR": (99.0, 2_000_000.0),
+    "SAR": (15.0, 200_000.0),
+    "QAR": (15.0, 200_000.0),
+    "AUD": (5.0, 100_000.0),
+    "CAD": (5.0, 100_000.0),
+}
 
 
 @dataclass(frozen=True)

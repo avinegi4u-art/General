@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from config import SKIP_DOMAINS, SKIP_EXTENSIONS, AppConfig
+from config import PRODUCT_PATH_HINTS, SKIP_DOMAINS, SKIP_EXTENSIONS, AppConfig
 from models import SearchResult
 
 logger = logging.getLogger(__name__)
@@ -22,6 +22,13 @@ def domain_from_url(url: str) -> str:
     if host.startswith("www."):
         host = host[4:]
     return host
+
+
+def looks_like_product_url(url: str) -> bool:
+    """Heuristic used to prefer marketplace/product URLs over category/search pages."""
+    parsed = urlparse(url)
+    path = parsed.path.lower()
+    return any(hint in path for hint in PRODUCT_PATH_HINTS)
 
 
 def is_skippable_url(url: str) -> bool:
@@ -36,6 +43,8 @@ def is_skippable_url(url: str) -> bool:
     for skipped in SKIP_DOMAINS:
         if host == skipped or host.endswith("." + skipped):
             return True
+    if "/search/" in path or path.rstrip("/").endswith("/search"):
+        return True
     return False
 
 
@@ -268,7 +277,7 @@ def search_web(query: str, config: AppConfig) -> list[SearchResult]:
     backend = build_search_backend(config)
     logger.info("Searching with backend=%s query=%r", backend.name, query)
     try:
-        hits = backend.search(query, config.max_results)
+        hits = backend.search(query, max(config.max_results * 2, config.max_pages))
     except Exception:
         logger.exception("Search backend %s failed", backend.name)
         raise
@@ -281,5 +290,6 @@ def search_web(query: str, config: AppConfig) -> list[SearchResult]:
             continue
         seen.add(key)
         unique.append(hit)
+    unique.sort(key=lambda hit: (not looks_like_product_url(hit.url), hit.url))
     logger.info("Search returned %d unique result(s)", len(unique))
     return unique[: config.max_results]

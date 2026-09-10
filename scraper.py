@@ -8,12 +8,10 @@ import random
 import re
 import time
 from typing import Any, Optional
-from urllib.parse import urlparse
-
 import requests
 from bs4 import BeautifulSoup, Tag
 
-from config import AppConfig, convert_to_base
+from config import AppConfig, PLAUSIBLE_PRICE_RANGE, convert_to_base
 from models import PriceInfo, ProductItem, SearchResult
 from search import domain_from_url
 
@@ -108,6 +106,28 @@ def normalize_currency(token: str) -> Optional[str]:
     return CURRENCY_ALIASES.get(key.replace(" ", ""))
 
 
+_BUDGET_PREFIX = re.compile(
+    r"(?:under|below|less\s+than|up\s*to|upto|cheaper\s+than|<)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _is_budget_context(text: str, start: int) -> bool:
+    """True when the match is a query-style cap such as “under 200 AED”, not a listing price."""
+    prefix = text[max(0, start - 28) : start]
+    return bool(_BUDGET_PREFIX.search(prefix))
+
+
+def is_plausible_price(amount: float, currency: str) -> bool:
+    """Reject years, crumbs, and amounts outside a per-currency sanity band."""
+    if amount <= 0:
+        return False
+    if amount == int(amount) and 1990 <= amount <= 2035:
+        return False
+    lo, hi = PLAUSIBLE_PRICE_RANGE.get(currency.upper(), (1.0, 10_000_000.0))
+    return lo <= amount <= hi
+
+
 def parse_price(
     text: str,
     default_currency: str = "AED",
@@ -118,20 +138,22 @@ def parse_price(
         return None
     compact = re.sub(r"\s+", " ", text)
     for pattern in PRICE_PATTERNS:
-        match = pattern.search(compact)
-        if not match:
-            continue
-        amount = parse_amount(match.group("amount"))
-        if amount is None:
-            continue
-        token = match.groupdict().get("currency") or match.groupdict().get("symbol") or ""
-        currency = normalize_currency(token) or default_currency
-        return PriceInfo(
-            amount=amount,
-            currency=currency,
-            original_text=match.group(0).strip(),
-            amount_base=convert_to_base(amount, currency, base_currency),
-        )
+        for match in pattern.finditer(compact):
+            if _is_budget_context(compact, match.start()):
+                continue
+            amount = parse_amount(match.group("amount"))
+            if amount is None:
+                continue
+            token = match.groupdict().get("currency") or match.groupdict().get("symbol") or ""
+            currency = normalize_currency(token) or default_currency
+            if not is_plausible_price(amount, currency):
+                continue
+            return PriceInfo(
+                amount=amount,
+                currency=currency,
+                original_text=match.group(0).strip(),
+                amount_base=convert_to_base(amount, currency, base_currency),
+            )
     return None
 
 
@@ -224,16 +246,13 @@ def extract_from_json_ld(
             currency = str(offer.get("priceCurrency") or default_currency)
             if price_raw is not None and "price" not in found:
                 amount = parse_amount(str(price_raw))
-                if amount is not None:
+                code = normalize_currency(currency) or default_currency
+                if amount is not None and is_plausible_price(amount, code):
                     found["price"] = PriceInfo(
                         amount=amount,
-                        currency=normalize_currency(currency) or default_currency,
+                        currency=code,
                         original_text=f"{price_raw} {currency}",
-                        amount_base=convert_to_base(
-                            amount,
-                            normalize_currency(currency) or default_currency,
-                            base_currency,
-                        ),
+                        amount_base=convert_to_base(amount, code, base_currency),
                     )
             break
 
@@ -358,13 +377,14 @@ def extract_from_html(
                 )
                 if amount is not None:
                     code = normalize_currency(currency) or config.base_currency
-                    price = PriceInfo(
-                        amount=amount,
-                        currency=code,
-                        original_text=f"{candidate} {code}",
-                        amount_base=convert_to_base(amount, code, config.base_currency),
-                    )
-                    break
+                    if is_plausible_price(amount, code):
+                        price = PriceInfo(
+                            amount=amount,
+                            currency=code,
+                            original_text=f"{candidate} {code}",
+                            amount_base=convert_to_base(amount, code, config.base_currency),
+                        )
+                        break
     if price is None:
         visible = soup.get_text(" ", strip=True)[:8000]
         price = parse_price(visible, config.base_currency, config.base_currency)
@@ -503,8 +523,3 @@ class PageScraper:
         return items
 
 
-def looks_like_product_url(url: str) -> bool:
-    """Heuristic used by callers that want to prefer marketplace/product URLs."""
-    path = urlparse(url).path.lower()
-    hints = ("/dp/", "/gp/product", "/p/", "/product", "/prd/", "/pd/", "itm")
-    return any(hint in path for hint in hints)
