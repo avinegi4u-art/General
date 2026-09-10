@@ -114,7 +114,34 @@ PATH_COUNTRY_SITES: dict[str, tuple[tuple[str, str], ...]] = {
     "samsung.com": (("/ae/", "AE"), ("/in/", "IN"), ("/uk/", "GB")),
 }
 
-# noon.com (and similar) ship across a regional cluster, not only the home TLD.
+# Leading subdomain that names a country storefront (saudi.sharafdg.com, uae.example.com).
+SUBDOMAIN_COUNTRY: dict[str, str] = {
+    "ae": "AE",
+    "uae": "AE",
+    "dubai": "AE",
+    "sa": "SA",
+    "ksa": "SA",
+    "saudi": "SA",
+    "qa": "QA",
+    "qatar": "QA",
+    "kw": "KW",
+    "kuwait": "KW",
+    "bh": "BH",
+    "bahrain": "BH",
+    "om": "OM",
+    "oman": "OM",
+    "eg": "EG",
+    "egypt": "EG",
+    "in": "IN",
+    "india": "IN",
+    "pk": "PK",
+    "uk": "GB",
+    "gb": "GB",
+    "us": "US",
+    "ca": "CA",
+    "au": "AU",
+    "de": "DE",
+}
 REGIONAL_LOCAL: dict[str, frozenset[str]] = {
     "noon.com": frozenset({"AE", "SA", "EG", "BH"}),
     "namshi.com": frozenset({"AE", "SA", "KW", "OM", "BH", "QA"}),
@@ -555,6 +582,12 @@ def _kind_label(kind: AvailabilityKind, country: CountryProfile) -> str:
     return "Availability unclear"
 
 
+def _subdomain_country(host: str) -> Optional[str]:
+    """Return a country code when the leftmost label is a country storefront."""
+    first = host.split(".")[0]
+    return SUBDOMAIN_COUNTRY.get(first)
+
+
 def classify_listing(url: str, source_domain: str, country: CountryProfile) -> ListingAvailability:
     """Classify a product URL as local, ships-here, foreign, or unknown."""
     host = _host(source_domain or url)
@@ -562,9 +595,10 @@ def classify_listing(url: str, source_domain: str, country: CountryProfile) -> L
     url_l = url.lower()
 
     path_code = _path_country(host, path or url_l)
-    if path_code == country.code:
+    sub_code = _subdomain_country(host)
+    if path_code == country.code or sub_code == country.code:
         kind: AvailabilityKind = "local"
-    elif path_code and path_code != country.code:
+    elif (path_code and path_code != country.code) or (sub_code and sub_code != country.code):
         kind = "foreign"
     elif _host_matches(host, country.local_domains) or any(host.endswith(tld) for tld in country.local_tlds):
         kind = "local"

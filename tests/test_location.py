@@ -33,6 +33,22 @@ def test_aliexpress_ships_to_uae() -> None:
     assert "Ships to" in listing.label
 
 
+def test_country_subdomain_is_not_treated_as_local() -> None:
+    ae = get_country("AE")
+    saudi = classify_listing(
+        "https://saudi.sharafdg.com/product/earbuds",
+        "saudi.sharafdg.com",
+        ae,
+    )
+    uae = classify_listing(
+        "https://uae.sharafdg.com/product/earbuds",
+        "uae.sharafdg.com",
+        ae,
+    )
+    assert saudi.kind == "foreign"
+    assert uae.kind == "local"
+
+
 def test_us_amazon_is_foreign_for_uae() -> None:
     ae = get_country("AE")
     listing = classify_listing("https://www.amazon.com/dp/B0TEST", "amazon.com", ae)
