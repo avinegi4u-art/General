@@ -646,14 +646,9 @@ def localize_query(query: str, country: CountryProfile) -> str:
 
 
 def marketplace_site_queries(query: str, country: CountryProfile) -> list[str]:
-    """Extra searches that force local stores and ship-to-you marketplaces into the mix."""
-    queries: list[str] = []
-    for domain in country.local_domains[:4]:
-        queries.append(f"{query} site:{domain}")
-    for domain in GLOBAL_SHIPS_DOMAINS[:2]:
-        queries.append(f"{query} site:{domain}")
-    for domain in country.extra_ships_domains[:2]:
-        extra = f"{query} site:{domain}"
-        if extra not in queries:
-            queries.append(extra)
+    """Two targeted searches: local stores, then AliExpress-style ship-to-you sellers."""
+    local = " OR ".join(f"site:{domain}" for domain in country.local_domains[:4])
+    queries = [f"{query} ({local})"]
+    ships = country.extra_ships_domains[:1] or ("aliexpress.com",)
+    queries.append(f"{query} site:{ships[0]}")
     return queries

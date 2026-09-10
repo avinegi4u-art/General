@@ -32,6 +32,32 @@ def looks_like_product_url(url: str) -> bool:
     return any(hint in path for hint in PRODUCT_PATH_HINTS)
 
 
+def looks_like_category_url(url: str) -> bool:
+    """True for shop category/index pages that are not a single product listing."""
+    if looks_like_product_url(url):
+        return False
+    path = urlparse(url).path.lower().rstrip("/")
+    last = path.rsplit("/", 1)[-1]
+    if last in {
+        "cycling",
+        "scooters",
+        "search",
+        "classified",
+        "category",
+        "categories",
+        "collections",
+        "products",
+        "deals",
+        "shop",
+        "store",
+        "electric-scooters-hoverboards",
+        "sports-equipment",
+        "hoverboards",
+    }:
+        return True
+    return False
+
+
 def is_skippable_url(url: str) -> bool:
     """True if the URL is a search/social page or a non-HTML asset."""
     parsed = urlparse(url)
@@ -45,6 +71,10 @@ def is_skippable_url(url: str) -> bool:
         if host == skipped or host.endswith("." + skipped):
             return True
     if "/search/" in path or path.rstrip("/").endswith("/search"):
+        return True
+    if "/w/wholesale" in path or "/wholesale-" in path:
+        return True
+    if "/wiki" in path or "/s/wiki" in path:
         return True
     return False
 
@@ -422,9 +452,11 @@ def _merge_hits(groups: Iterable[list[SearchResult]]) -> list[SearchResult]:
 def search_marketplace_sites(query: str, config: AppConfig) -> list[SearchResult]:
     """Fan out site-restricted searches so local stores are not missed."""
     from location import get_country, marketplace_site_queries
+    from querying import precise_search_query
 
     country = get_country(config.country_code)
-    queries = marketplace_site_queries(query, country)
+    focused = precise_search_query(query)
+    queries = marketplace_site_queries(focused, country)
     if not queries:
         return []
     ddg = DuckDuckGoBackend(region=config.search_region)
@@ -461,9 +493,11 @@ def search_web(query: str, config: AppConfig) -> list[SearchResult]:
     another country's storefronts.
     """
     from location import classify_listing, get_country, localize_query
+    from querying import hit_is_plausible, precise_search_query
 
     country = get_country(config.country_code)
-    localized = localize_query(query, country)
+    focused = precise_search_query(query)
+    localized = localize_query(focused, country)
     backend = build_search_backend(config)
     logger.info(
         "Searching with backend=%s country=%s query=%r localized=%r",
@@ -487,13 +521,19 @@ def search_web(query: str, config: AppConfig) -> list[SearchResult]:
     unique = _merge_hits([hits, extra])
     unique.sort(
         key=lambda hit: (
+            not hit_is_plausible(query, hit.title, hit.snippet, hit.url),
+            looks_like_category_url(hit.url),
             {"local": 0, "ships": 1, "unknown": 2, "foreign": 3}[
                 classify_listing(hit.url, hit.source_domain, country).kind
             ],
             not looks_like_product_url(hit.url),
-            hit.url,
         )
     )
+    plausible = [
+        hit for hit in unique if hit_is_plausible(query, hit.title, hit.snippet, hit.url)
+    ]
+    if len(plausible) >= 4:
+        unique = plausible
     buyable_n = sum(
         1
         for hit in unique

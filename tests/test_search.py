@@ -10,6 +10,7 @@ def test_skips_search_and_social() -> None:
     assert is_skippable_url("https://youtube.com/watch?v=abc")
     assert is_skippable_url("https://example.com/spec.pdf")
     assert not is_skippable_url("https://www.noon.com/uae-en/earbuds")
+    assert is_skippable_url("https://ar.aliexpress.com/w/wholesale-vsett-10-scooter.html")
 
 
 def test_product_url_heuristic() -> None:

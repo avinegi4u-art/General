@@ -84,7 +84,7 @@ overall = w_relevance * relevance + w_price * price_score + w_rating * rating_sc
 
 Default weights: relevance `0.38`, price `0.20`, rating `0.22`, availability `0.20` (normalized to sum to 1).
 
-- **Relevance** — query-term overlap in title (heavier) and description/features, plus a small bonus for an exact phrase match.
+- **Relevance** — query-term overlap in the title (heavier) and description, with **brand and model required**. A search for `vsett 10+ scooter` will not rank a mudguard that only says “compatible with VSETT 10+”. Spare parts are skipped unless you ask for them.
 - **Price** — log-scaled min–max so *lower is better*, without letting ultra-cheap outliers dominate. Missing prices get a penalty (`0.20`) and are **excluded from Best price**. Over-budget items (when the query says “under 200 AED”) are down-weighted, not dropped.
 - **Rating** — `stars / 5`. Missing ratings use a neutral default of **3.5/5** (shown with `*` in the table).
 - **Availability** — sold in your country scores highest, then sellers that ship to you (AliExpress and similar), then unknown sites, then other-country storefronts.

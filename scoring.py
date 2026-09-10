@@ -10,31 +10,12 @@ from typing import Optional
 from config import AppConfig, ScoreWeights, convert_to_base
 from location import classify_listing, get_country, is_buyable
 from models import LabeledPick, ProductItem, RankedPicks, ScoreBreakdown
-
-STOPWORDS = frozenset(
-    {
-        "a",
-        "an",
-        "and",
-        "for",
-        "in",
-        "of",
-        "on",
-        "or",
-        "the",
-        "to",
-        "with",
-        "under",
-        "below",
-        "less",
-        "than",
-        "best",
-        "buy",
-        "cheap",
-        "price",
-        "review",
-        "reviews",
-    }
+from querying import (
+    accessory_multiplier,
+    missing_required,
+    query_match_terms,
+    required_terms,
+    tokenize,
 )
 
 BUDGET_PATTERN = re.compile(
@@ -44,12 +25,6 @@ BUDGET_PATTERN = re.compile(
     r"(?:\s*(?P<currency2>AED|USD|EUR|GBP|INR|SAR|QAR|Dhs|DH|Rs\.?))?",
     re.IGNORECASE,
 )
-
-
-def tokenize(text: str) -> list[str]:
-    """Lowercase alphanumeric tokens, minus a small stopword list."""
-    words = re.findall(r"[a-z0-9]+", text.lower())
-    return [word for word in words if word not in STOPWORDS and len(word) > 1]
 
 
 def extract_budget(query: str) -> Optional[float]:
@@ -100,12 +75,16 @@ def budget_in_base(query: str, base_currency: str) -> Optional[float]:
 
 
 def relevance_score(query: str, item: ProductItem) -> float:
-    """0–1 score based on query-term overlap in title, domain, description, and features.
+    """0–1 score based on query-term overlap, with brand/model required.
 
-    Title matches weigh more than body matches. An exact phrase hit in the title
-    is rewarded so that loosely related pages do not outrank true product pages.
+    Title matches weigh more than body matches. Spare parts (“compatible with
+    VSETT 10+”, mudguards, kits) score near zero unless the query asks for a part.
+    Brand and model tokens such as ``vsett`` and ``10+`` must appear or the score
+    is capped so they cannot win Best price.
     """
-    query_terms = tokenize(query)
+    query_terms = query_match_terms(query)
+    if not query_terms:
+        query_terms = tokenize(query)
     if not query_terms:
         return 0.0
 
@@ -124,12 +103,23 @@ def relevance_score(query: str, item: ProductItem) -> float:
     body_hits = sum(1 for term in query_terms if term in body_tokens)
     phrase = " ".join(query_terms)
     phrase_bonus = 0.15 if phrase and phrase in title else 0.0
+    req = required_terms(query)
+    if len(req) >= 2 and " ".join(req[:2]) in title:
+        phrase_bonus = max(phrase_bonus, 0.2)
+    elif req and req[0] in title and any(term.endswith("+") and term in title_tokens for term in req):
+        phrase_bonus = max(phrase_bonus, 0.18)
     domain_bonus = 0.05 if any(term in item.source_domain.lower() for term in query_terms) else 0.0
 
     title_part = title_hits / len(query_terms)
     body_part = body_hits / len(query_terms)
     score = 0.70 * title_part + 0.30 * body_part + phrase_bonus + domain_bonus
-    return round(min(1.0, score), 4)
+
+    if missing_required(query, item.title):
+        # Brand/model missing from the title: this is not the product they asked for.
+        score = min(score, 0.18) * 0.4
+
+    score *= accessory_multiplier(query, item.title)
+    return round(min(1.0, max(0.0, score)), 4)
 
 
 def _log_price_score(amount: float, lo: float, hi: float) -> float:
@@ -235,11 +225,30 @@ def rank_items(
     notes: list[str] = []
     country = get_country(config.country_code)
 
-    preferred = [item for item in scored if is_buyable(item.availability)]
-    unknown = [item for item in scored if item.availability == "unknown"]
+    # Match the product first; only then prefer local / ships-to-you storefronts.
+    on_query = [
+        item for item in scored if item.scores.relevance >= config.min_relevance_for_value
+    ]
+    off_query = len(scored) - len(on_query)
+    if on_query:
+        if off_query:
+            notes.append(
+                f"Hid {off_query} listing(s) that were spare parts or did not match "
+                "the product name you typed."
+            )
+        pool = on_query
+    else:
+        notes.append(
+            "No listing closely matched the product you asked for; spare parts and "
+            "lookalikes were skipped."
+        )
+        pool = []
+
+    preferred = [item for item in pool if is_buyable(item.availability)]
+    unknown = [item for item in pool if item.availability == "unknown"]
     if len(preferred) >= 3:
         catalogue = preferred
-        dropped = len(scored) - len(preferred)
+        dropped = len(pool) - len(preferred)
         if dropped:
             notes.append(
                 f"Hid {dropped} listing(s) from other countries that may not ship to "
@@ -248,18 +257,19 @@ def rank_items(
             )
     elif preferred or unknown:
         catalogue = preferred + unknown
-        foreign_n = sum(1 for item in scored if item.availability == "foreign")
+        foreign_n = sum(1 for item in pool if item.availability == "foreign")
         if foreign_n:
             notes.append(
                 f"Few local or deliverable listings were found for {country.name}; "
                 "other-country storefronts were still excluded from the top picks."
             )
     else:
-        catalogue = scored
-        notes.append(
-            f"No clearly local or ship-to-{country.name} listings were found; "
-            "showing all results as a fallback."
-        )
+        catalogue = pool
+        if pool:
+            notes.append(
+                f"No clearly local or ship-to-{country.name} listings were found; "
+                "showing close product matches as a fallback."
+            )
 
     priced_relevant = [
         item
@@ -269,10 +279,9 @@ def rank_items(
     ]
     if not priced_relevant:
         notes.append(
-            "No priced items met the relevance threshold; Best price uses the lowest "
-            "known price among all results."
+            "No priced items were a close enough match to the query; Best price is empty "
+            "rather than falling back to a cheap unrelated listing."
         )
-        priced_relevant = [item for item in catalogue if item.price_base is not None]
 
     value_pool = [
         item
@@ -281,13 +290,13 @@ def rank_items(
         and item.scores.relevance >= config.min_relevance_for_value
     ]
     if not value_pool:
-        value_pool = [item for item in catalogue if item.price_base is not None]
+        notes.append("No priced items available for Best value.")
 
     rated_pool = [
         item
         for item in catalogue
         if item.scores.relevance >= config.min_relevance_for_value
-    ] or catalogue
+    ]
 
     overall_sorted = sorted(catalogue, key=lambda i: i.scores.overall, reverse=True)
     price_sorted = sorted(priced_relevant, key=lambda i: (i.price_base or math.inf, -i.scores.overall))
