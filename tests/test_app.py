@@ -16,6 +16,8 @@ def test_index_renders_search_form() -> None:
     html = response.get_data(as_text=True)
     assert "FindBest" in html
     assert 'id="search-form"' in html
+    assert 'id="country"' in html
+    assert "Deliver to" in html
     assert "wireless earbuds under 200 AED" in html
 
 
@@ -72,12 +74,28 @@ def test_search_returns_five_picks() -> None:
     )
     with patch("app.run_pipeline", return_value=picks):
         client = app.test_client()
-        response = client.post("/api/search", json={"query": "wireless earbuds under 200 AED"})
+        response = client.post(
+            "/api/search",
+            json={"query": "wireless earbuds under 200 AED", "country": "AE"},
+        )
     assert response.status_code == 200
     payload = response.get_json()
     labels = [pick["label"] for pick in payload["picks"]]
     assert labels == ["Best match", "Best price", "Best value", "Best rated", "Also consider"]
     assert len(payload["picks"]) == 5
+
+
+def test_geo_endpoint_lists_countries() -> None:
+    from app import app
+
+    client = app.test_client()
+    response = client.get("/api/geo", headers={"Accept-Language": "en-IN"})
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["country"] == "IN"
+    codes = [row["code"] for row in payload["countries"]]
+    assert "AE" in codes
+    assert "IN" in codes
 
 
 def test_everywhere_backend_is_selectable() -> None:

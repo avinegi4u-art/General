@@ -148,10 +148,19 @@ class GoogleCseBackend(SearchBackend):
 
     name = "google_cse"
 
-    def __init__(self, api_key: str, cse_id: str, timeout: float) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        cse_id: str,
+        timeout: float,
+        gl: str = "ae",
+        hl: str = "en",
+    ) -> None:
         self.api_key = api_key
         self.cse_id = cse_id
         self.timeout = timeout
+        self.gl = gl
+        self.hl = hl
 
     def search(self, query: str, max_results: int) -> list[SearchResult]:
         params = {
@@ -159,6 +168,8 @@ class GoogleCseBackend(SearchBackend):
             "cx": self.cse_id,
             "q": query,
             "num": min(max_results, 10),
+            "gl": self.gl,
+            "hl": self.hl,
         }
         response = requests.get(
             "https://www.googleapis.com/customsearch/v1",
@@ -188,10 +199,21 @@ class SerpApiBackend(SearchBackend):
 
     name = "serpapi"
 
-    def __init__(self, api_key: str, timeout: float, endpoint: str) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        timeout: float,
+        endpoint: str,
+        gl: str = "ae",
+        hl: str = "en",
+        location: str = "United Arab Emirates",
+    ) -> None:
         self.api_key = api_key
         self.timeout = timeout
         self.endpoint = endpoint
+        self.gl = gl
+        self.hl = hl
+        self.location = location
 
     def search(self, query: str, max_results: int) -> list[SearchResult]:
         params = {
@@ -199,6 +221,9 @@ class SerpApiBackend(SearchBackend):
             "q": query,
             "api_key": self.api_key,
             "num": min(max_results, 20),
+            "gl": self.gl,
+            "hl": self.hl,
+            "location": self.location,
         }
         response = requests.get(self.endpoint, params=params, timeout=self.timeout)
         response.raise_for_status()
@@ -231,20 +256,42 @@ class EverywhereBackend(SearchBackend):
 
     name = "everywhere"
 
-    def __init__(self, region: str, timeout: float, serpapi_url: str) -> None:
+    def __init__(
+        self,
+        region: str,
+        timeout: float,
+        serpapi_url: str,
+        gl: str = "ae",
+        hl: str = "en",
+        location: str = "United Arab Emirates",
+    ) -> None:
         self.region = region
         self.timeout = timeout
         self.serpapi_url = serpapi_url
+        self.gl = gl
+        self.hl = hl
+        self.location = location
 
     def _backends(self) -> list[SearchBackend]:
         backends: list[SearchBackend] = [DuckDuckGoBackend(self.region)]
         serp_key = os.getenv("SERPAPI_KEY", "").strip()
         if serp_key:
-            backends.append(SerpApiBackend(serp_key, self.timeout, self.serpapi_url))
+            backends.append(
+                SerpApiBackend(
+                    serp_key,
+                    self.timeout,
+                    self.serpapi_url,
+                    gl=self.gl,
+                    hl=self.hl,
+                    location=self.location,
+                )
+            )
         google_key = os.getenv("GOOGLE_API_KEY", "").strip()
         cse_id = os.getenv("GOOGLE_CSE_ID", "").strip()
         if google_key and cse_id:
-            backends.append(GoogleCseBackend(google_key, cse_id, self.timeout))
+            backends.append(
+                GoogleCseBackend(google_key, cse_id, self.timeout, gl=self.gl, hl=self.hl)
+            )
         return backends
 
     def search(self, query: str, max_results: int) -> list[SearchResult]:
@@ -314,12 +361,22 @@ def build_search_backend(config: AppConfig) -> SearchBackend:
             region=config.search_region,
             timeout=config.request_timeout,
             serpapi_url=config.serpapi_url,
+            gl=config.google_gl,
+            hl=config.google_hl,
+            location=config.google_location,
         )
     if name in {"serpapi", "serp"}:
         api_key = os.getenv("SERPAPI_KEY", "").strip()
         if not api_key:
             raise RuntimeError("SEARCH_BACKEND=serpapi requires SERPAPI_KEY.")
-        return SerpApiBackend(api_key, config.request_timeout, config.serpapi_url)
+        return SerpApiBackend(
+            api_key,
+            config.request_timeout,
+            config.serpapi_url,
+            gl=config.google_gl,
+            hl=config.google_hl,
+            location=config.google_location,
+        )
     if name in {"google_cse", "cse"}:
         api_key = os.getenv("GOOGLE_API_KEY", "").strip()
         cse_id = os.getenv("GOOGLE_CSE_ID", "").strip()
@@ -327,13 +384,17 @@ def build_search_backend(config: AppConfig) -> SearchBackend:
             raise RuntimeError(
                 "SEARCH_BACKEND=google_cse requires GOOGLE_API_KEY and GOOGLE_CSE_ID."
             )
-        return GoogleCseBackend(api_key, cse_id, config.request_timeout)
+        return GoogleCseBackend(
+            api_key, cse_id, config.request_timeout, gl=config.google_gl, hl=config.google_hl
+        )
     if name in {"google", "googlesearch"}:
         api_key = os.getenv("GOOGLE_API_KEY", "").strip()
         cse_id = os.getenv("GOOGLE_CSE_ID", "").strip()
         if api_key and cse_id:
             logger.info("GOOGLE_API_KEY detected; using Programmable Search JSON API.")
-            return GoogleCseBackend(api_key, cse_id, config.request_timeout)
+            return GoogleCseBackend(
+                api_key, cse_id, config.request_timeout, gl=config.google_gl, hl=config.google_hl
+            )
         logger.warning(
             "Using googlesearch-python. Prefer SERPAPI_KEY or GOOGLE_CSE_ID for a "
             "ToS-friendly Google search."
@@ -345,24 +406,103 @@ def build_search_backend(config: AppConfig) -> SearchBackend:
     )
 
 
+def _merge_hits(groups: Iterable[list[SearchResult]]) -> list[SearchResult]:
+    seen: set[str] = set()
+    unique: list[SearchResult] = []
+    for group in groups:
+        for hit in group:
+            key = hit.url.split("#", 1)[0].rstrip("/")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            unique.append(hit)
+    return unique
+
+
+def search_marketplace_sites(query: str, config: AppConfig) -> list[SearchResult]:
+    """Fan out site-restricted searches so local stores are not missed."""
+    from location import get_country, marketplace_site_queries
+
+    country = get_country(config.country_code)
+    queries = marketplace_site_queries(query, country)
+    if not queries:
+        return []
+    ddg = DuckDuckGoBackend(region=config.search_region)
+    per_query = 5
+
+    def run_one(site_query: str) -> list[SearchResult]:
+        try:
+            logger.info("marketplace search: %r", site_query)
+            return ddg.search(site_query, per_query)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("marketplace search failed for %r: %s", site_query, exc)
+            return []
+
+    extra: list[SearchResult] = []
+    with ThreadPoolExecutor(max_workers=min(6, len(queries))) as pool:
+        futures = [pool.submit(run_one, site_query) for site_query in queries]
+        try:
+            for future in as_completed(futures, timeout=max(config.request_timeout + 6.0, 18.0)):
+                try:
+                    extra.extend(future.result())
+                except Exception as worker_err:  # noqa: BLE001
+                    logger.warning("marketplace worker failed: %s", worker_err)
+        except TimeoutError:
+            logger.warning("marketplace searches timed out")
+    return extra
+
+
 def search_web(query: str, config: AppConfig) -> list[SearchResult]:
-    """Run a search and return unique, scrape-eligible results."""
+    """Run a search and return unique, scrape-eligible results.
+
+    The open-web query is localized to the shopper's country. Additional
+    site-restricted searches pull in local stores and sellers that ship there
+    (for example AliExpress) so those listings are not crowded out by
+    another country's storefronts.
+    """
+    from location import classify_listing, get_country, localize_query
+
+    country = get_country(config.country_code)
+    localized = localize_query(query, country)
     backend = build_search_backend(config)
-    logger.info("Searching with backend=%s query=%r", backend.name, query)
+    logger.info(
+        "Searching with backend=%s country=%s query=%r localized=%r",
+        backend.name,
+        country.code,
+        query,
+        localized,
+    )
     try:
-        hits = backend.search(query, max(config.max_results * 2, config.max_pages))
+        hits = backend.search(localized, max(config.max_results * 2, config.max_pages))
     except Exception:
         logger.exception("Search backend %s failed", backend.name)
         raise
 
-    seen: set[str] = set()
-    unique: list[SearchResult] = []
-    for hit in hits:
-        key = hit.url.split("#", 1)[0].rstrip("/")
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(hit)
-    unique.sort(key=lambda hit: (not looks_like_product_url(hit.url), hit.url))
-    logger.info("Search returned %d unique result(s)", len(unique))
+    extra: list[SearchResult] = []
+    try:
+        extra = search_marketplace_sites(query, config)
+    except Exception as exc:  # noqa: BLE001 — extras must not fail the whole search
+        logger.warning("marketplace searches failed: %s", exc)
+
+    unique = _merge_hits([hits, extra])
+    unique.sort(
+        key=lambda hit: (
+            {"local": 0, "ships": 1, "unknown": 2, "foreign": 3}[
+                classify_listing(hit.url, hit.source_domain, country).kind
+            ],
+            not looks_like_product_url(hit.url),
+            hit.url,
+        )
+    )
+    buyable_n = sum(
+        1
+        for hit in unique
+        if classify_listing(hit.url, hit.source_domain, country).kind in {"local", "ships"}
+    )
+    logger.info(
+        "Search returned %d unique result(s) (%d local/ships) for %s",
+        len(unique),
+        buyable_n,
+        country.code,
+    )
     return unique[: config.max_results]

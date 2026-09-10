@@ -8,6 +8,7 @@ from statistics import median
 from typing import Optional
 
 from config import AppConfig, ScoreWeights, convert_to_base
+from location import classify_listing, get_country, is_buyable
 from models import LabeledPick, ProductItem, RankedPicks, ScoreBreakdown
 
 STOPWORDS = frozenset(
@@ -150,6 +151,7 @@ def apply_scores(
     """Fill ``item.scores`` for every product using the current catalogue as context."""
     weights = (weights or config.weights).normalized()
     budget = budget_in_base(query, config.base_currency)
+    country = get_country(config.country_code)
 
     known_prices = [item.price_base for item in items if item.price_base and item.price_base > 0]
     if known_prices:
@@ -164,6 +166,11 @@ def apply_scores(
         lo = hi = mid = 1.0
 
     for item in items:
+        listing = classify_listing(item.url, item.source_domain, country)
+        item.availability = listing.kind
+        item.availability_label = listing.label
+        avail_s = listing.score
+
         rel = relevance_score(query, item)
 
         if item.price_base and item.price_base > 0:
@@ -187,20 +194,24 @@ def apply_scores(
             weights.relevance * rel
             + weights.price * price_s
             + weights.rating * rating_s
+            + weights.availability * avail_s
         )
 
         # Best value: quality per unit of (log) price. Unknown prices get a low value score.
+        # Local / ships-here listings keep more of their value score than foreign storefronts.
         quality = 0.55 * rel + 0.45 * rating_s
         if item.price_base and item.price_base > 0:
             unit = 1.0 + math.log1p(item.price_base / max(mid, 1.0))
             value = quality / unit
         else:
             value = quality * 0.25
+        value *= 0.55 + 0.45 * avail_s
 
         item.scores = ScoreBreakdown(
             relevance=round(rel, 4),
             price=round(price_s, 4),
             rating=round(rating_s, 4),
+            availability=round(avail_s, 4),
             overall=round(overall, 4),
             value=round(value, 4),
         )
@@ -222,10 +233,37 @@ def rank_items(
     weights = (weights or config.weights).normalized()
     scored = apply_scores(items, query, config, weights)
     notes: list[str] = []
+    country = get_country(config.country_code)
+
+    preferred = [item for item in scored if is_buyable(item.availability)]
+    unknown = [item for item in scored if item.availability == "unknown"]
+    if len(preferred) >= 3:
+        catalogue = preferred
+        dropped = len(scored) - len(preferred)
+        if dropped:
+            notes.append(
+                f"Hid {dropped} listing(s) from other countries that may not ship to "
+                f"{country.name}. Showing stores in {country.name} and sellers that "
+                f"deliver there (for example AliExpress)."
+            )
+    elif preferred or unknown:
+        catalogue = preferred + unknown
+        foreign_n = sum(1 for item in scored if item.availability == "foreign")
+        if foreign_n:
+            notes.append(
+                f"Few local or deliverable listings were found for {country.name}; "
+                "other-country storefronts were still excluded from the top picks."
+            )
+    else:
+        catalogue = scored
+        notes.append(
+            f"No clearly local or ship-to-{country.name} listings were found; "
+            "showing all results as a fallback."
+        )
 
     priced_relevant = [
         item
-        for item in scored
+        for item in catalogue
         if item.price_base is not None
         and item.scores.relevance >= config.min_relevance_for_price
     ]
@@ -234,24 +272,24 @@ def rank_items(
             "No priced items met the relevance threshold; Best price uses the lowest "
             "known price among all results."
         )
-        priced_relevant = [item for item in scored if item.price_base is not None]
+        priced_relevant = [item for item in catalogue if item.price_base is not None]
 
     value_pool = [
         item
-        for item in scored
+        for item in catalogue
         if item.price_base is not None
         and item.scores.relevance >= config.min_relevance_for_value
     ]
     if not value_pool:
-        value_pool = [item for item in scored if item.price_base is not None]
+        value_pool = [item for item in catalogue if item.price_base is not None]
 
     rated_pool = [
         item
-        for item in scored
+        for item in catalogue
         if item.scores.relevance >= config.min_relevance_for_value
-    ] or scored
+    ] or catalogue
 
-    overall_sorted = sorted(scored, key=lambda i: i.scores.overall, reverse=True)
+    overall_sorted = sorted(catalogue, key=lambda i: i.scores.overall, reverse=True)
     price_sorted = sorted(priced_relevant, key=lambda i: (i.price_base or math.inf, -i.scores.overall))
     value_sorted = sorted(value_pool, key=lambda i: i.scores.value, reverse=True)
     rated_sorted = sorted(
@@ -275,6 +313,10 @@ def rank_items(
         notes.append("No priced items available for Best value.")
     if not scored:
         notes.append("No search results were scraped.")
+    notes.insert(
+        0,
+        f"Ranked for {country.name}: local stores first, then sellers that ship there.",
+    )
 
     answers = _build_answers(
         limit=config.top_answers,
@@ -288,6 +330,8 @@ def rank_items(
     return RankedPicks(
         query=query,
         base_currency=config.base_currency,
+        country_code=country.code,
+        country_name=country.name,
         items=overall_sorted,
         best_price=best_price,
         best_overall=best_overall,
@@ -299,6 +343,7 @@ def rank_items(
             "relevance": weights.relevance,
             "price": weights.price,
             "rating": weights.rating,
+            "availability": weights.availability,
         },
         notes=notes,
     )

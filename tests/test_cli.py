@@ -21,11 +21,14 @@ def test_parser_accepts_weights_and_json() -> None:
             "--weights",
             '{"relevance":0.5,"price":0.2,"rating":0.3}',
             "--json",
+            "--country",
+            "AE",
         ]
     )
     config = apply_cli_overrides(AppConfig.from_env(), args)
     assert config.max_results == 8
     assert config.base_currency == "USD"
+    assert config.country_code == "AE"
     assert abs(config.weights.relevance - 0.5) < 1e-9
     assert args.as_json is True
 
@@ -54,5 +57,6 @@ def test_format_table_includes_all_categories() -> None:
     assert "Best overall match" in table or "Best match" in table
     assert "Best value" in table
     assert "noon.com" in table
+    assert "Ships" in table
     payload = json.dumps(picks.to_dict())
     assert "Demo Wireless Earbuds" in payload

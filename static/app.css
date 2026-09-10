@@ -147,6 +147,46 @@ select {
   font-size: 0.85rem;
 }
 
+.ship-badge {
+  display: inline-block;
+  margin: 0;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  width: fit-content;
+}
+
+.ship-badge.local {
+  background: #d7efe6;
+  color: #0f6e5b;
+}
+
+.ship-badge.ships {
+  background: #dce7f6;
+  color: #3d5a80;
+}
+
+.ship-badge.unknown {
+  background: #efe4d1;
+  color: #6b4c1e;
+}
+
+.ship-badge.foreign {
+  background: #f8d7cc;
+  color: #7a2a12;
+}
+
+.notes {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #efe4d1;
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;
@@ -261,7 +301,7 @@ select {
 
 .row {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr;
+  grid-template-columns: 2fr 1fr 1.2fr 1fr 1fr;
   gap: 10px;
   padding: 12px 0;
   border-bottom: 1px solid var(--line);

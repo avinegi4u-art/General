@@ -44,6 +44,7 @@ class ScoreBreakdown:
     relevance: float = 0.0
     price: float = 0.0
     rating: float = 0.0
+    availability: float = 0.0
     overall: float = 0.0
     value: float = 0.0
 
@@ -62,6 +63,8 @@ class ProductItem:
     review_count: Optional[int] = None
     rating_is_default: bool = False
     scores: ScoreBreakdown = field(default_factory=ScoreBreakdown)
+    availability: str = "unknown"
+    availability_label: str = ""
     scrape_ok: bool = False
     error: Optional[str] = None
 
@@ -113,6 +116,8 @@ class RankedPicks:
     query: str
     base_currency: str
     items: list[ProductItem]
+    country_code: str = "AE"
+    country_name: str = "United Arab Emirates"
     best_price: Optional[ProductItem] = None
     best_overall: Optional[ProductItem] = None
     best_value: Optional[ProductItem] = None
@@ -129,6 +134,8 @@ class RankedPicks:
         return {
             "query": self.query,
             "base_currency": self.base_currency,
+            "country_code": self.country_code,
+            "country_name": self.country_name,
             "weights": self.weights,
             "items_considered": len(self.items),
             "notes": self.notes,

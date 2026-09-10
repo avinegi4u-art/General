@@ -11,6 +11,7 @@ from typing import Optional, Sequence
 from tabulate import tabulate
 
 from config import AppConfig, parse_weights
+from location import apply_country, country_from_query
 from models import ProductItem, RankedPicks
 from scraper import PageScraper
 from scoring import rank_items
@@ -43,7 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--base-currency",
         default=None,
-        help="Currency used for price comparison (default AED).",
+        help="Currency used for price comparison (default: the selected country's currency).",
+    )
+    parser.add_argument(
+        "--country",
+        default=None,
+        help="Shopper country code, e.g. AE, IN, US. Prefers local stores and sellers that ship there.",
     )
     parser.add_argument(
         "--weights",
@@ -79,7 +85,7 @@ def configure_logging(verbose: bool) -> None:
     logging.getLogger("primp").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     if verbose:
-        for name in ("search", "scraper", "scoring", "main"):
+        for name in ("search", "scraper", "scoring", "main", "location"):
             logging.getLogger(name).setLevel(logging.DEBUG)
 
 
@@ -88,12 +94,15 @@ def apply_cli_overrides(config: AppConfig, args: argparse.Namespace) -> AppConfi
         config.max_results = max(1, args.max_results)
     if args.max_pages is not None:
         config.max_pages = max(1, args.max_pages)
-    if args.base_currency:
-        config.base_currency = args.base_currency.upper()
     if args.weights:
         config.weights = parse_weights(args.weights)
     if args.backend:
         config.search_backend = args.backend.lower()
+    country_code = args.country or country_from_query(args.query) or config.country_code
+    set_currency = args.base_currency is None
+    apply_country(config, country_code, set_currency=set_currency)
+    if args.base_currency:
+        config.base_currency = args.base_currency.upper()
     return config
 
 
@@ -133,13 +142,14 @@ def format_table(picks: RankedPicks) -> str:
         )
     for label, item in categories:
         if item is None:
-            rows.append([label, "—", "—", "—", "—", "—", "—"])
+            rows.append([label, "—", "—", "—", "—", "—", "—", "—"])
             continue
         rows.append(
             [
                 label,
                 _truncate(item.title, 48),
                 item.source_domain,
+                item.availability_label or item.availability,
                 _price_cell(item, picks.base_currency),
                 _rating_cell(item),
                 f"{item.scores.overall:.2f}",
@@ -149,15 +159,19 @@ def format_table(picks: RankedPicks) -> str:
 
     table = tabulate(
         rows,
-        headers=["Category", "Title", "Source", "Price", "Rating", "Overall", "Why / summary"],
+        headers=["Category", "Title", "Source", "Ships", "Price", "Rating", "Overall", "Why / summary"],
         tablefmt="github",
     )
     extra: list[str] = []
     extra.append(
-        "\nScores: overall = w_rel·relevance + w_price·price + w_rating·rating "
+        "\nScores: overall = w_rel·relevance + w_price·price + w_rating·rating + w_avail·availability "
         f"(weights {picks.weights}). Rating marked * used the neutral default."
     )
-    extra.append(f"Items considered: {len(picks.items)}. Base currency: {picks.base_currency}.")
+    extra.append(
+        f"Items considered: {len(picks.items)}. "
+        f"Country: {picks.country_name} ({picks.country_code}). "
+        f"Base currency: {picks.base_currency}."
+    )
     if picks.notes:
         extra.append("Notes: " + " ".join(picks.notes))
 
@@ -167,11 +181,13 @@ def format_table(picks: RankedPicks) -> str:
             [
                 _truncate(item.title, 40),
                 item.source_domain,
+                item.availability,
                 _price_cell(item, picks.base_currency),
                 _rating_cell(item),
                 f"{item.scores.relevance:.2f}",
                 f"{item.scores.price:.2f}",
                 f"{item.scores.rating:.2f}",
+                f"{item.scores.availability:.2f}",
                 f"{item.scores.overall:.2f}",
                 f"{item.scores.value:.2f}",
             ]
@@ -183,11 +199,13 @@ def format_table(picks: RankedPicks) -> str:
             headers=[
                 "Title",
                 "Source",
+                "Avail",
                 "Price",
                 "Rating",
                 "Rel",
                 "PriceS",
                 "RateS",
+                "AvailS",
                 "Overall",
                 "Value",
             ],
@@ -204,12 +222,14 @@ def run(query: str, config: AppConfig) -> RankedPicks:
         return RankedPicks(
             query=query,
             base_currency=config.base_currency,
+            country_code=config.country_code,
             items=[],
             notes=["Search returned no usable results."],
             weights={
                 "relevance": config.weights.relevance,
                 "price": config.weights.price,
                 "rating": config.weights.rating,
+                "availability": config.weights.availability,
             },
         )
     scraper = PageScraper(config)

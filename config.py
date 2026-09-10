@@ -107,18 +107,20 @@ PLAUSIBLE_PRICE_RANGE: dict[str, tuple[float, float]] = {
 class ScoreWeights:
     """Relative importance of each scoring component. Values are normalized to sum to 1."""
 
-    relevance: float = 0.45
-    price: float = 0.25
-    rating: float = 0.30
+    relevance: float = 0.38
+    price: float = 0.20
+    rating: float = 0.22
+    availability: float = 0.20
 
     def normalized(self) -> "ScoreWeights":
-        total = self.relevance + self.price + self.rating
+        total = self.relevance + self.price + self.rating + self.availability
         if total <= 0:
             return ScoreWeights()
         return ScoreWeights(
             relevance=self.relevance / total,
             price=self.price / total,
             rating=self.rating / total,
+            availability=self.availability / total,
         )
 
 
@@ -133,8 +135,12 @@ class AppConfig:
     max_results: int = 12
     max_pages: int = 10
     base_currency: str = "AED"
+    country_code: str = "AE"
     search_backend: str = "duckduckgo"
     search_region: str = "ae-en"
+    google_gl: str = "ae"
+    google_hl: str = "en"
+    google_location: str = "United Arab Emirates"
     user_agents: tuple[str, ...] = DEFAULT_USER_AGENTS
     weights: ScoreWeights = field(default_factory=ScoreWeights)
     missing_price_score: float = 0.20
@@ -157,6 +163,7 @@ class AppConfig:
         cfg.max_results = int(os.getenv("PRODUCT_FINDER_MAX_RESULTS", cfg.max_results))
         cfg.max_pages = int(os.getenv("PRODUCT_FINDER_MAX_PAGES", cfg.max_pages))
         cfg.base_currency = os.getenv("PRODUCT_FINDER_BASE_CURRENCY", cfg.base_currency).upper()
+        cfg.country_code = os.getenv("PRODUCT_FINDER_COUNTRY", cfg.country_code).upper()
         cfg.search_backend = os.getenv("SEARCH_BACKEND", cfg.search_backend).lower()
         cfg.search_region = os.getenv("SEARCH_REGION", cfg.search_region)
         cfg.default_rating = float(os.getenv("PRODUCT_FINDER_DEFAULT_RATING", cfg.default_rating))
@@ -175,6 +182,7 @@ class AppConfig:
                 relevance=float(os.getenv("SCORE_WEIGHT_RELEVANCE", cfg.weights.relevance)),
                 price=float(os.getenv("SCORE_WEIGHT_PRICE", cfg.weights.price)),
                 rating=float(os.getenv("SCORE_WEIGHT_RATING", cfg.weights.rating)),
+                availability=float(os.getenv("SCORE_WEIGHT_AVAILABILITY", cfg.weights.availability)),
             ).normalized()
         return cfg
 
@@ -187,9 +195,10 @@ def parse_weights(raw: str | dict[str, Any]) -> ScoreWeights:
     else:
         data = raw
     weights = ScoreWeights(
-        relevance=float(data.get("relevance", 0.45)),
-        price=float(data.get("price", 0.25)),
-        rating=float(data.get("rating", 0.30)),
+        relevance=float(data.get("relevance", 0.38)),
+        price=float(data.get("price", 0.20)),
+        rating=float(data.get("rating", 0.22)),
+        availability=float(data.get("availability", 0.0)),
     )
     return weights.normalized()
 

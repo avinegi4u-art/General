@@ -3,18 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>FindBest — search the web, get the top 5</title>
+    <title>FindBest — local stores and sellers that ship to you</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}" />
   </head>
   <body>
     <div class="page">
       <header class="hero">
-        <p class="eyebrow">Web · Google · marketplaces · reviews</p>
+        <p class="eyebrow">Local stores · ships to you · AliExpress and similar</p>
         <h1>FindBest</h1>
         <p class="lede">
-          Type what you want. We search the open web and rank the
-          <strong>top 5</strong>: best price, best match, best value,
-          best rated, and one more to consider.
+          Type what you want. We rank the <strong>top 5</strong> from stores in
+          <strong>your country</strong>, plus overseas sellers that deliver there
+          (for example AliExpress). Other-country listings that will not ship to
+          you are pushed aside.
         </p>
       </header>
 
@@ -34,6 +35,20 @@
         </div>
         <div class="controls">
           <label>
+            Deliver to
+            <select id="country" name="country">
+              {% for country in countries %}
+              <option
+                value="{{ country.code }}"
+                data-currency="{{ country.currency }}"
+                {% if country.code == "AE" %}selected{% endif %}
+              >
+                {{ country.name }}
+              </option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
             Currency
             <select id="currency" name="base_currency">
               <option value="AED" selected>AED</option>
@@ -42,9 +57,17 @@
               <option value="GBP">GBP</option>
               <option value="INR">INR</option>
               <option value="SAR">SAR</option>
+              <option value="QAR">QAR</option>
+              <option value="KWD">KWD</option>
+              <option value="BHD">BHD</option>
+              <option value="OMR">OMR</option>
+              <option value="EGP">EGP</option>
+              <option value="PKR">PKR</option>
+              <option value="CAD">CAD</option>
+              <option value="AUD">AUD</option>
             </select>
           </label>
-          <p class="hint">Searches Google and other web indexes, then reads product pages.</p>
+          <p class="hint">Local stores first, then sellers that ship to your country.</p>
         </div>
         <div class="chips" aria-label="Example searches">
           {% for example in examples %}
@@ -55,6 +78,7 @@
 
       <p id="status" class="status" hidden></p>
       <p id="error" class="error" hidden></p>
+      <p id="notes" class="notes" hidden></p>
 
       <section id="picks" class="picks" hidden></section>
       <section id="more" class="more" hidden>
@@ -63,7 +87,8 @@
       </section>
     </div>
     <footer>
-      Rankings mix relevance, price, and rating. Missing prices are skipped for Best price.
+      Rankings mix relevance, price, rating, and whether the listing is sold locally
+      or ships to your country. Missing prices are skipped for Best price.
       Missing ratings use a neutral 3.5/5.
     </footer>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
