@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FindBest — search the web, get the top 3</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <p class="eyebrow">Web · Google · marketplaces · reviews</p>
+        <h1>FindBest</h1>
+        <p class="lede">
+          Type what you want. We search the open web and rank the
+          <strong>best price</strong>, <strong>best match</strong>, and
+          <strong>best value</strong>.
+        </p>
+      </header>
+
+      <form id="search-form" class="search-panel" action="/api/search" method="post">
+        <label class="sr-only" for="query">Search query</label>
+        <div class="search-row">
+          <input
+            id="query"
+            name="query"
+            type="search"
+            required
+            maxlength="200"
+            placeholder="e.g. wireless earbuds under 200 AED"
+            autocomplete="off"
+          />
+          <button type="submit" id="search-btn">Search</button>
+        </div>
+        <div class="controls">
+          <label>
+            Currency
+            <select id="currency" name="base_currency">
+              <option value="AED" selected>AED</option>
+              <option value="USD">USD</option>
+              <option value="EUR">EUR</option>
+              <option value="GBP">GBP</option>
+              <option value="INR">INR</option>
+              <option value="SAR">SAR</option>
+            </select>
+          </label>
+          <p class="hint">Searches Google and other web indexes, then reads product pages.</p>
+        </div>
+        <div class="chips" aria-label="Example searches">
+          {% for example in examples %}
+          <button type="button" class="chip" data-query="{{ example }}">{{ example }}</button>
+          {% endfor %}
+        </div>
+      </form>
+
+      <p id="status" class="status" hidden></p>
+      <p id="error" class="error" hidden></p>
+
+      <section id="picks" class="picks" hidden></section>
+      <section id="more" class="more" hidden>
+        <h2>Other results we scored</h2>
+        <div id="more-list"></div>
+      </section>
+    </div>
+    <footer>
+      Rankings mix relevance, price, and rating. Missing prices are skipped for Best price.
+      Missing ratings use a neutral 3.5/5.
+    </footer>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>

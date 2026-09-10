@@ -53,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--backend",
         default=None,
-        help="Search backend: duckduckgo, google, google_cse, or serpapi.",
+        help="Search backend: everywhere, duckduckgo, google, google_cse, or serpapi.",
     )
     parser.add_argument(
         "--json",

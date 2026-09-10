@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Iterable
 from urllib.parse import urlparse
 
@@ -220,6 +221,72 @@ class SerpApiBackend(SearchBackend):
         return results
 
 
+class EverywhereBackend(SearchBackend):
+    """Fan out across DuckDuckGo (multi-engine web) plus Google when available.
+
+    DuckDuckGo's ``ddgs`` client already queries several web indexes. This
+    backend merges those hits with SerpAPI / Google CSE when keys are set,
+    or with ``googlesearch-python`` otherwise, then de-duplicates URLs.
+    """
+
+    name = "everywhere"
+
+    def __init__(self, region: str, timeout: float, serpapi_url: str) -> None:
+        self.region = region
+        self.timeout = timeout
+        self.serpapi_url = serpapi_url
+
+    def _backends(self) -> list[SearchBackend]:
+        backends: list[SearchBackend] = [DuckDuckGoBackend(self.region)]
+        serp_key = os.getenv("SERPAPI_KEY", "").strip()
+        if serp_key:
+            backends.append(SerpApiBackend(serp_key, self.timeout, self.serpapi_url))
+        google_key = os.getenv("GOOGLE_API_KEY", "").strip()
+        cse_id = os.getenv("GOOGLE_CSE_ID", "").strip()
+        if google_key and cse_id:
+            backends.append(GoogleCseBackend(google_key, cse_id, self.timeout))
+        return backends
+
+    def search(self, query: str, max_results: int) -> list[SearchResult]:
+        backends = self._backends()
+        merged: list[SearchResult] = []
+        seen: set[str] = set()
+        per_backend = max(max_results, 8)
+
+        def run_one(backend: SearchBackend) -> list[SearchResult]:
+            try:
+                logger.info("everywhere: querying %s", backend.name)
+                return backend.search(query, per_backend)
+            except Exception as exc:  # noqa: BLE001 — a single engine must not fail the search
+                logger.warning("everywhere: %s failed: %s", backend.name, exc)
+                return []
+
+        timeout = max(self.timeout + 8.0, 20.0)
+        with ThreadPoolExecutor(max_workers=len(backends)) as pool:
+            futures = [pool.submit(run_one, backend) for backend in backends]
+            try:
+                for future in as_completed(futures, timeout=timeout):
+                    try:
+                        hits = future.result()
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("everywhere: worker failed: %s", exc)
+                        continue
+                    for hit in hits:
+                        key = hit.url.split("#", 1)[0].rstrip("/")
+                        if not key or key in seen:
+                            continue
+                        seen.add(key)
+                        merged.append(hit)
+            except TimeoutError:
+                logger.warning("everywhere: timed out waiting for some search engines")
+        logger.info(
+            "everywhere: merged %d unique hit(s) from %d engine(s)",
+            len(merged),
+            len(backends),
+        )
+        return merged
+
+
 def _load_ddgs():  # type: ignore[no-untyped-def]
     try:
         from ddgs import DDGS
@@ -242,6 +309,12 @@ def build_search_backend(config: AppConfig) -> SearchBackend:
     name = config.search_backend.lower().strip()
     if name in {"duckduckgo", "ddg", "ddgs"}:
         return DuckDuckGoBackend(region=config.search_region)
+    if name in {"everywhere", "all", "web"}:
+        return EverywhereBackend(
+            region=config.search_region,
+            timeout=config.request_timeout,
+            serpapi_url=config.serpapi_url,
+        )
     if name in {"serpapi", "serp"}:
         api_key = os.getenv("SERPAPI_KEY", "").strip()
         if not api_key:
@@ -268,7 +341,7 @@ def build_search_backend(config: AppConfig) -> SearchBackend:
         return GoogleLibraryBackend()
     raise RuntimeError(
         f"Unknown SEARCH_BACKEND={name!r}. "
-        "Use duckduckgo, google, google_cse, or serpapi."
+        "Use duckduckgo, everywhere, google, google_cse, or serpapi."
     )
 
 

@@ -1,14 +1,14 @@
-# Product Finder CLI
+# Product Finder
 
-Search the web for products matching a natural-language query, scrape listing pages, score the results, and print three winners:
+Search the web for a product and get **three ranked picks**:
 
 - **Best price** — lowest effective price among reasonably relevant items
-- **Best overall match** — highest combined score of relevance + price + rating
+- **Best match** — highest combined score of relevance + price + rating
 - **Best value** — strongest quality-per-price heuristic
 
-The tool does **not** scrape Google HTML by hand. Search goes through DuckDuckGo (`ddgs`), SerpAPI, Google Programmable Search, or (as a last resort) `googlesearch-python`.
+Use the **web app** for a search box, or the CLI if you prefer the terminal.
 
-## Install
+## Web app (recommended)
 
 Python 3.10+ is required.
 
@@ -16,6 +16,18 @@ Python 3.10+ is required.
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+python app.py
+```
+
+Open [http://127.0.0.1:5055](http://127.0.0.1:5055), type a query such as `wireless earbuds under 200 AED`, and wait 15–30 seconds while FindBest searches Google and other web indexes, then reads product pages.
+
+The app uses the `everywhere` search backend by default (DuckDuckGo’s multi-engine web search plus Google when available).
+
+## CLI
+
+```bash
+python main.py --query "wireless earbuds under 200 AED"
+python main.py --query "wireless earbuds under 200 AED" --json
 ```
 
 ## Configure the search backend
@@ -24,7 +36,7 @@ Set environment variables (or pass `--backend`):
 
 | Variable | Purpose |
 | --- | --- |
-| `SEARCH_BACKEND` | `duckduckgo` (default), `google`, `google_cse`, or `serpapi` |
+| `SEARCH_BACKEND` | `everywhere` (web app default), `duckduckgo` (CLI default), `google`, `google_cse`, or `serpapi` |
 | `SEARCH_REGION` | DuckDuckGo region, default `ae-en` |
 | `SERPAPI_KEY` | Required when `SEARCH_BACKEND=serpapi` |
 | `GOOGLE_API_KEY` + `GOOGLE_CSE_ID` | Official Google Programmable Search JSON API |
@@ -88,12 +100,14 @@ Scraping is polite: configurable timeouts/retries, random delays between request
 
 | File | Role |
 | --- | --- |
+| `app.py` | Web app (search box + three ranked cards) |
 | `main.py` | CLI (`argparse`), table + JSON output |
-| `search.py` | Search backends |
+| `search.py` | Search backends (`everywhere` merges multiple engines) |
 | `scraper.py` | HTTP fetch + HTML / price / rating parsing |
 | `scoring.py` | Scoring and category ranking |
 | `models.py` | Dataclasses (`ProductItem`, `SearchResult`, …) |
 | `config.py` | Weights, timeouts, user-agents, FX rates |
+| `templates/` + `static/` | FindBest UI |
 
 The ranking helpers are written so you can later add CSV export, extra categories, or a UI without changing the scrape pipeline.
 
