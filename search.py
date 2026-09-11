@@ -514,16 +514,31 @@ def search_marketplace_sites(query: str, config: AppConfig) -> list[SearchResult
             return []
 
     extra: list[SearchResult] = []
-    with ThreadPoolExecutor(max_workers=min(6, len(queries))) as pool:
-        futures = [pool.submit(run_one, site_query) for site_query in queries]
-        try:
-            for future in as_completed(futures, timeout=max(config.request_timeout + 6.0, 18.0)):
-                try:
-                    extra.extend(future.result())
-                except Exception as worker_err:  # noqa: BLE001
-                    logger.warning("marketplace worker failed: %s", worker_err)
-        except TimeoutError:
-            logger.warning("marketplace searches timed out")
+    primary: list[str] = []
+    rest = list(queries)
+    if req and country.local_domains:
+        first = f'"{" ".join(req)}" site:{country.local_domains[0]}'
+        rest = [row for row in queries if row != first]
+        primary.append(first)
+
+    for site_query in primary:
+        rows = run_one(site_query)
+        extra.extend(rows)
+        has_product = any(looks_like_product_url(hit.url) for hit in rows)
+        if not has_product:
+            extra.extend(run_one(site_query))
+
+    if rest:
+        with ThreadPoolExecutor(max_workers=min(4, len(rest))) as pool:
+            futures = [pool.submit(run_one, site_query) for site_query in rest]
+            try:
+                for future in as_completed(futures, timeout=max(config.request_timeout + 6.0, 18.0)):
+                    try:
+                        extra.extend(future.result())
+                    except Exception as worker_err:  # noqa: BLE001
+                        logger.warning("marketplace worker failed: %s", worker_err)
+            except TimeoutError:
+                logger.warning("marketplace searches timed out")
     return extra
 
 

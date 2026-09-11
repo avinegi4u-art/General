@@ -212,3 +212,21 @@ def test_ranking_prefers_local_over_cheaper_foreign() -> None:
     assert picks.best_price is not None
     assert "amazon.com" not in picks.best_price.url
     assert picks.country_code == "AE"
+
+
+def test_other_country_listings_are_not_a_uae_fallback() -> None:
+    config = AppConfig()
+    config.country_code = "AE"
+    ksa = ProductItem(
+        title="NAVEE Electric Scooter GT3, 25Km/H Max Speed",
+        url="https://www.noon.com/saudi-en/navee-electric-scooter-gt3/p/XYZ",
+        source_domain="noon.com",
+        description="NAVEE GT3 electric scooter",
+        price=PriceInfo(amount=1619, currency="SAR", original_text="SAR 1619", amount_base=1586),
+        rating=4.4,
+    )
+    picks = rank_items([ksa], "navee gt3 electric scooter buy", config)
+    urls = [pick.item.url for pick in picks.answers if pick.item]
+    assert urls == []
+    assert picks.best_overall is None
+    assert any("other countries" in note.lower() for note in picks.notes)

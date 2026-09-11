@@ -240,8 +240,8 @@ def rank_items(
                 f"{country.name}. Showing stores in {country.name} and sellers that "
                 f"deliver there (for example AliExpress)."
             )
-    elif preferred or unknown:
-        catalogue = preferred + unknown
+    elif unknown:
+        catalogue = unknown
         foreign_n = sum(1 for item in pool if item.availability == "foreign")
         if foreign_n:
             notes.append(
@@ -249,11 +249,11 @@ def rank_items(
                 "other-country storefronts were still excluded from the top picks."
             )
     else:
-        catalogue = pool
+        catalogue = []
         if pool:
             notes.append(
-                f"No clearly local or ship-to-{country.name} listings were found; "
-                "showing close product matches as a fallback."
+                f"Found listings only from other countries that may not ship to "
+                f"{country.name}; they were left out of the top picks."
             )
 
     priced_relevant = [
