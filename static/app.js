@@ -10,7 +10,7 @@ const moreList = document.getElementById("more-list");
 const locationLine = document.getElementById("location-line");
 
 const COUNTRY_EXAMPLES = {
-  AE: ["wireless earbuds under 200 AED", "noise cancelling headphones", "office chair under 500 AED"],
+  AE: ["best e scooter under 10k aed", "wireless earbuds under 200 AED", "noise cancelling headphones"],
   IN: ["wireless earbuds under 2000 INR", "noise cancelling headphones", "office chair under 8000 INR"],
   SA: ["wireless earbuds under 200 SAR", "noise cancelling headphones"],
   US: ["wireless earbuds under $40", "noise cancelling headphones"],

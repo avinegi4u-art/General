@@ -195,9 +195,9 @@ def _ae() -> CountryProfile:
         local_tlds=(".ae",),
         path_hints=("/uae", "/ae/", "/en-ae", "/en_ae"),
         example_queries=(
+            "best e scooter under 10k aed",
             "wireless earbuds under 200 AED",
             "noise cancelling headphones",
-            "office chair under 500 AED",
         ),
     )
 

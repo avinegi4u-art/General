@@ -3,13 +3,19 @@
 A search for “vsett 10+ scooter” must match the scooter, not a mudguard that
 merely says “compatible with VSETT 10+”. Brand/model tokens are required; spare
 parts are penalized unless the query itself asks for a part.
+
+Category queries such as “best e scooter under 10k aed” are rewritten the
+way a shopping search would: “e scooter” → electric scooter, “10k” → 10000,
+and listings that only match the letters 10k (gold, ohms, 10KG washers) are
+dropped.
 """
 
 from __future__ import annotations
 
 import re
-from typing import Iterable
+from typing import Iterable, Optional
 
+from config import convert_to_base
 from models import SearchResult
 
 STOPWORDS = frozenset(
@@ -44,6 +50,8 @@ STOPWORDS = frozenset(
 CURRENCY_TOKENS = frozenset(
     {"aed", "usd", "eur", "gbp", "inr", "sar", "qar", "dhs", "dh", "rs", "kwd", "bhd", "omr"}
 )
+
+_CURRENCY_ALT = r"AED|USD|EUR|GBP|INR|SAR|QAR|Dhs|DH|Rs\.?|\$|€|£|₹"
 
 # Common product-category words. These describe what you want, but a listing
 # can mention them while still being a spare part (a mudguard for a scooter).
@@ -145,7 +153,66 @@ ACCESSORY_NEGATIVES: tuple[str, ...] = (
     "compatible",
 )
 
+# Words that share a token with a scooter query but are a different product.
+SCOOTER_OFF_CATEGORY = frozenset(
+    {
+        "washer",
+        "washers",
+        "resistor",
+        "resistors",
+        "ohm",
+        "ohms",
+        "earring",
+        "earrings",
+        "thermometer",
+        "thermometers",
+        "jewelry",
+        "jewellery",
+        "necklace",
+        "bracelet",
+        "washing",
+        "10kg",
+        "10kgs",
+    }
+)
+
+SCOOTER_SEARCH_NEGATIVES: tuple[str, ...] = (
+    "resistor",
+    "ohm",
+    "washer",
+    "earrings",
+    "thermometer",
+    "jewelry",
+)
+
 _PLUS_MODEL = re.compile(r"\b(\d+[a-z]?)\s*(?:\+|plus)\b", re.IGNORECASE)
+_E_SCOOTER = re.compile(r"\be[\s\-]?scooters?\b", re.IGNORECASE)
+_E_BIKE = re.compile(r"\be[\s\-]?bikes?\b", re.IGNORECASE)
+_COMPACT_K_BUDGET = re.compile(
+    r"((?:under|below|less\s+than|upto|up\s+to|<)\s*)"
+    rf"(?P<currency>{_CURRENCY_ALT})?"
+    r"\s*"
+    r"(?P<num>\d+(?:\.\d+)?)\s*[kK]\b"
+    rf"(?:\s*(?P<currency2>{_CURRENCY_ALT}))?",
+    re.IGNORECASE,
+)
+BUDGET_PATTERN = re.compile(
+    r"(?:under|below|less\s+than|upto|up\s+to|<)\s*"
+    rf"(?P<currency>{_CURRENCY_ALT})?\s*"
+    r"(?P<amount>\d+(?:\.\d+)?\s*[kK]|\d[\d,]*(?:\.\d+)?)"
+    rf"(?:\s*(?P<currency2>AED|USD|EUR|GBP|INR|SAR|QAR|Dhs|DH|Rs\.?))?",
+    re.IGNORECASE,
+)
+_CURRENCY_ALIASES = {
+    "DHS": "AED",
+    "DH": "AED",
+    "$": "USD",
+    "€": "EUR",
+    "£": "GBP",
+    "₹": "INR",
+    "RS": "INR",
+    "RS.": "INR",
+}
 
 
 def normalize_model_text(text: str) -> str:
@@ -159,24 +226,124 @@ def tokenize(text: str) -> list[str]:
     return [word for word in words if word not in STOPWORDS and len(word) > 1]
 
 
-_BUDGET_AMOUNT = re.compile(
-    r"(?:under|below|less\s+than|upto|up\s+to|<)\s*"
-    r"(?:AED|USD|EUR|GBP|INR|SAR|QAR|Dhs|DH|Rs\.?|\$|€|£|₹)?\s*"
-    r"(\d[\d,]*)",
-    re.IGNORECASE,
-)
+def _format_budget_amount(amount: float) -> str:
+    if float(amount).is_integer():
+        return str(int(amount))
+    return str(amount)
+
+
+def _expand_compact_budget(text: str) -> str:
+    """Turn “under 10k AED” into “under 10000 AED” so 10k is not a product token."""
+
+    def repl(match: re.Match[str]) -> str:
+        amount = float(match.group("num")) * 1000.0
+        currency = match.group("currency") or match.group("currency2") or ""
+        prefix = match.group(1)
+        rendered = _format_budget_amount(amount)
+        if currency:
+            return f"{prefix}{rendered} {currency}"
+        return f"{prefix}{rendered}"
+
+    return _COMPACT_K_BUDGET.sub(repl, text)
+
+
+def expand_shopper_query(query: str) -> str:
+    """Expand shopping shorthand so search and ranking see the real product.
+
+    “e scooter” / “e-scooter” become “electric scooter”. Compact budgets such as
+    “under 10k aed” become “under 10000 aed”.
+    """
+    text = query.strip()
+    text = _E_SCOOTER.sub("electric scooter", text)
+    text = _E_BIKE.sub("electric bike", text)
+    text = _expand_compact_budget(text)
+    return " ".join(text.split())
+
+
+def _parse_amount_token(raw: str) -> Optional[float]:
+    compact = re.sub(r"\s+", "", raw.replace(",", ""))
+    if not compact:
+        return None
+    try:
+        if compact[-1] in "kK":
+            return float(compact[:-1]) * 1000.0
+        return float(compact)
+    except ValueError:
+        return None
+
+
+def extract_budget(query: str) -> Optional[float]:
+    """Return a numeric budget mentioned in the query, if any.
+
+    Understands “under 200 AED” and compact forms such as “under 10k aed”
+    (10000). Currency conversion of the budget itself is left to the caller.
+    """
+    match = BUDGET_PATTERN.search(expand_shopper_query(query))
+    if not match:
+        match = BUDGET_PATTERN.search(query)
+    if not match:
+        return None
+    value = _parse_amount_token(match.group("amount"))
+    if value is None or value <= 0:
+        return None
+    return value
+
+
+def extract_budget_currency(query: str, default: str) -> str:
+    for text in (expand_shopper_query(query), query):
+        match = BUDGET_PATTERN.search(text)
+        if not match:
+            continue
+        token = match.group("currency") or match.group("currency2")
+        if not token:
+            continue
+        key = token.strip().upper()
+        return _CURRENCY_ALIASES.get(key, key)
+    return default
+
+
+def budget_in_base(query: str, base_currency: str) -> Optional[float]:
+    """Parse a query budget and convert it into ``base_currency`` using fixed FX rates."""
+    amount = extract_budget(query)
+    if amount is None:
+        return None
+    currency = extract_budget_currency(query, base_currency)
+    return convert_to_base(amount, currency, base_currency)
+
+
+def budget_search_clause(query: str) -> str:
+    """Natural-language budget for the web query, e.g. “under 10000 AED”."""
+    amount = extract_budget(query)
+    if amount is None:
+        return ""
+    currency = extract_budget_currency(query, "")
+    rendered = _format_budget_amount(amount)
+    if currency:
+        return f"under {rendered} {currency}"
+    return f"under {rendered}"
+
+
+def _budget_tokens_to_drop(query: str) -> set[str]:
+    drop: set[str] = set(CURRENCY_TOKENS)
+    for text in (query, expand_shopper_query(query)):
+        match = BUDGET_PATTERN.search(text)
+        if not match:
+            continue
+        raw = match.group("amount").replace(",", "").replace(" ", "").lower()
+        drop.add(raw)
+        value = _parse_amount_token(match.group("amount"))
+        if value is not None and float(value).is_integer():
+            drop.add(str(int(value)))
+        if raw.endswith("k"):
+            drop.add(raw)
+    return drop
 
 
 def query_match_terms(query: str) -> list[str]:
     """Query tokens used for matching, minus budget amounts and currency codes."""
-    terms = tokenize(query)
-    drop: set[str] = set(CURRENCY_TOKENS)
-    match = _BUDGET_AMOUNT.search(query)
-    if match:
-        raw = match.group(1).replace(",", "")
-        drop.add(raw)
-        if raw.isdigit():
-            drop.add(str(int(raw)))
+    expanded = expand_shopper_query(query)
+    terms = tokenize(expanded)
+    drop = _budget_tokens_to_drop(query)
     return [term for term in terms if term not in drop]
 
 
@@ -187,7 +354,51 @@ def required_terms(query: str) -> list[str]:
 
 def query_wants_parts(query: str) -> bool:
     """True when the shopper is explicitly looking for a spare or accessory."""
-    return any(term in ACCESSORY_TERMS for term in tokenize(query))
+    return any(term in ACCESSORY_TERMS for term in tokenize(expand_shopper_query(query)))
+
+
+def wants_electric_scooter(query: str) -> bool:
+    """True for “e scooter”, “e-scooter”, or “electric scooter” shopping queries."""
+    lowered = query.lower()
+    if _E_SCOOTER.search(lowered):
+        return True
+    tokens = set(tokenize(expand_shopper_query(query)))
+    return "electric" in tokens and "scooter" in tokens
+
+
+def looks_like_electric_scooter(text: str) -> bool:
+    """True when the listing is an electric scooter, not a motorcycle part."""
+    lowered = text.lower().replace("-", " ")
+    if "electric scooter" in lowered:
+        return True
+    if re.search(r"\bescooters?\b", lowered) or re.search(r"\be scooters?\b", lowered):
+        return True
+    tokens = set(tokenize(text))
+    return "electric" in tokens and "scooter" in tokens
+
+
+def is_off_category(query: str, text: str) -> bool:
+    """True when the listing is a different product that collides on a token."""
+    q_tokens = set(query_match_terms(query))
+    if "scooter" not in q_tokens and "scooters" not in q_tokens:
+        return False
+    tokens = set(tokenize(text))
+    if tokens & SCOOTER_OFF_CATEGORY:
+        return True
+    lowered = text.lower()
+    return any(
+        marker in lowered
+        for marker in ("washing machine", "10k ohm", "10k gold", "10kt ", "10k yellow")
+    )
+
+
+def category_matches(query: str, text: str) -> bool:
+    """True when the listing is the kind of product the query asked for."""
+    if is_off_category(query, text):
+        return False
+    if wants_electric_scooter(query):
+        return looks_like_electric_scooter(text)
+    return True
 
 
 def _term_in_text(term: str, tokens: set[str], text: str) -> bool:
@@ -233,8 +444,23 @@ def accessory_multiplier(query: str, title: str) -> float:
     return 1.0
 
 
+def _vehicle_query(query: str) -> bool:
+    terms = set(query_match_terms(query))
+    return bool(terms & {"scooter", "scooters", "bike", "bicycle", "vehicle"})
+
+
+def category_search_negatives(query: str) -> tuple[str, ...]:
+    if "scooter" in query_match_terms(query) or wants_electric_scooter(query):
+        return SCOOTER_SEARCH_NEGATIVES
+    return ()
+
+
 def precise_search_query(query: str) -> str:
-    """Rewrite the web query: quote brand+model, drop spare-part listings."""
+    """Rewrite the web query like a shopping search, not a token dump.
+
+    Brand searches stay quoted (“vsett 10+”). Category queries become
+    ``"electric scooter" under 10000 AED`` instead of matching the letters 10k.
+    """
     required = required_terms(query)
     generic = [term for term in query_match_terms(query) if term in GENERIC_TERMS]
     if required:
@@ -242,11 +468,28 @@ def precise_search_query(query: str) -> str:
         core = f'"{quoted}"'
         if generic:
             core = f"{core} {' '.join(generic)}"
+    elif generic:
+        core = f'"{" ".join(generic)}"'
     else:
-        core = query.strip()
-    if required and not query_wants_parts(query):
-        negatives = " ".join(f"-{word}" for word in ACCESSORY_NEGATIVES)
-        core = f"{core} {negatives}"
+        core = " ".join(query_match_terms(query)) or expand_shopper_query(query)
+
+    budget_clause = budget_search_clause(query)
+    if budget_clause and budget_clause.lower() not in core.lower():
+        core = f"{core} {budget_clause}"
+
+    negatives: list[str] = []
+    if not query_wants_parts(query):
+        if required or _vehicle_query(query):
+            negatives.extend(ACCESSORY_NEGATIVES)
+        negatives.extend(category_search_negatives(query))
+    if negatives:
+        seen: set[str] = set()
+        unique: list[str] = []
+        for word in negatives:
+            if word not in seen:
+                seen.add(word)
+                unique.append(word)
+        core = f"{core} " + " ".join(f"-{word}" for word in unique)
     return core
 
 
@@ -263,6 +506,8 @@ def hit_is_plausible(query: str, title: str, snippet: str = "", url: str = "") -
     if missing_brand:
         return False
     if accessory_multiplier(query, f"{title} {slug}") < 0.5:
+        return False
+    if not category_matches(query, blob):
         return False
     lowered = f"{title} {snippet}".lower()
     if not query_wants_parts(query) and any(

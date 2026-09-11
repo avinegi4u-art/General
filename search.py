@@ -493,7 +493,7 @@ def search_web(query: str, config: AppConfig) -> list[SearchResult]:
     another country's storefronts.
     """
     from location import classify_listing, get_country, localize_query
-    from querying import hit_is_plausible, precise_search_query
+    from querying import expand_shopper_query, hit_is_plausible, precise_search_query
 
     country = get_country(config.country_code)
     focused = precise_search_query(query)
@@ -521,9 +521,10 @@ def search_web(query: str, config: AppConfig) -> list[SearchResult]:
     unique = _merge_hits([hits, extra])
     if len(unique) < 8:
         try:
-            logger.info("Few hits; retrying with the original query %r", query)
+            expanded = expand_shopper_query(query)
+            logger.info("Few hits; retrying with the expanded query %r", expanded)
             retry = backend.search(
-                localize_query(query, country),
+                localize_query(expanded, country),
                 max(config.max_results, 8),
             )
             unique = _merge_hits([unique, retry])

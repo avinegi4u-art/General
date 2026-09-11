@@ -3,75 +3,22 @@
 from __future__ import annotations
 
 import math
-import re
 from statistics import median
 from typing import Optional
 
-from config import AppConfig, ScoreWeights, convert_to_base
+from config import AppConfig, ScoreWeights
 from location import classify_listing, get_country, is_buyable
 from models import LabeledPick, ProductItem, RankedPicks, ScoreBreakdown
 from querying import (
     accessory_multiplier,
+    budget_in_base,
+    category_matches,
+    expand_shopper_query,
     missing_required,
     query_match_terms,
     required_terms,
     tokenize,
 )
-
-BUDGET_PATTERN = re.compile(
-    r"(?:under|below|less\s+than|upto|up\s+to|<)\s*"
-    r"(?P<currency>AED|USD|EUR|GBP|INR|SAR|QAR|Dhs|DH|Rs\.?|\$|€|£|₹)?\s*"
-    r"(?P<amount>\d[\d,]*(?:\.\d+)?)"
-    r"(?:\s*(?P<currency2>AED|USD|EUR|GBP|INR|SAR|QAR|Dhs|DH|Rs\.?))?",
-    re.IGNORECASE,
-)
-
-
-def extract_budget(query: str) -> Optional[float]:
-    """Return a numeric budget mentioned in the query, if any.
-
-    Currency conversion of the budget itself is left to the caller; this returns
-    the raw amount as written (e.g. 200 from “under 200 AED”).
-    """
-    match = BUDGET_PATTERN.search(query)
-    if not match:
-        return None
-    raw = match.group("amount").replace(",", "")
-    try:
-        value = float(raw)
-    except ValueError:
-        return None
-    return value if value > 0 else None
-
-
-def extract_budget_currency(query: str, default: str) -> str:
-    match = BUDGET_PATTERN.search(query)
-    if not match:
-        return default
-    token = match.group("currency") or match.group("currency2")
-    if not token:
-        return default
-    aliases = {
-        "DHS": "AED",
-        "DH": "AED",
-        "$": "USD",
-        "€": "EUR",
-        "£": "GBP",
-        "₹": "INR",
-        "RS": "INR",
-        "RS.": "INR",
-    }
-    key = token.strip().upper()
-    return aliases.get(key, key)
-
-
-def budget_in_base(query: str, base_currency: str) -> Optional[float]:
-    """Parse a query budget and convert it into ``base_currency`` using fixed FX rates."""
-    amount = extract_budget(query)
-    if amount is None:
-        return None
-    currency = extract_budget_currency(query, base_currency)
-    return convert_to_base(amount, currency, base_currency)
 
 
 def relevance_score(query: str, item: ProductItem) -> float:
@@ -119,6 +66,10 @@ def relevance_score(query: str, item: ProductItem) -> float:
         score = min(score, 0.18) * 0.4
 
     score *= accessory_multiplier(query, item.title)
+    blob = f"{item.title} {item.description}"
+    if not category_matches(query, blob):
+        # Washers, resistors, 10K gold, motorcycle thermometers, etc.
+        score = min(score, 0.14) * 0.3
     return round(min(1.0, max(0.0, score)), 4)
 
 
@@ -326,6 +277,9 @@ def rank_items(
         0,
         f"Ranked for {country.name}: local stores first, then sellers that ship there.",
     )
+    interpreted = expand_shopper_query(query)
+    if interpreted.lower() != " ".join(query.lower().split()):
+        notes.insert(0, f"Interpreted as {interpreted}.")
 
     answers = _build_answers(
         limit=config.top_answers,

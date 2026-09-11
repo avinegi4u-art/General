@@ -5,8 +5,10 @@ from __future__ import annotations
 from models import PriceInfo, ProductItem
 from querying import (
     accessory_multiplier,
+    expand_shopper_query,
     hit_is_plausible,
     precise_search_query,
+    query_match_terms,
     required_terms,
     tokenize,
 )
@@ -117,3 +119,104 @@ def test_relevance_prefers_the_scooter_over_parts() -> None:
     assert "Electric Scooter" in picks.best_overall.title
     assert picks.best_price is not None
     assert picks.best_price.url == scooter.url
+
+
+def test_e_scooter_under_10k_is_not_a_10k_token_search() -> None:
+    query = "best e scooter under 10k aed"
+    assert expand_shopper_query(query) == "best electric scooter under 10000 aed"
+    assert "10k" not in query_match_terms(query)
+    assert required_terms(query) == []
+    assert query_match_terms(query) == ["electric", "scooter"]
+
+    rewritten = precise_search_query(query)
+    assert '"electric scooter"' in rewritten
+    assert "under 10000 AED" in rewritten
+    assert "10k" not in rewritten.lower()
+    assert "-resistor" in rewritten
+    assert "-washer" in rewritten
+    assert "-earrings" in rewritten
+    assert "-thermometer" in rewritten
+
+    assert hit_is_plausible(query, "Xiaomi Electric Scooter 6 Pro")
+    assert hit_is_plausible(query, "CRONY M365 MAX Electric Scooter")
+    assert not hit_is_plausible(
+        query,
+        "Thermometer for motorcycle scooter M8 10K for UU125 UY125",
+    )
+    assert not hit_is_plausible(query, "Geepas 10KG Semi Automatic Twin Hub Washer")
+    assert not hit_is_plausible(query, "100pcs 10k Ohm Resistor 1 4w 25 Watt")
+    assert not hit_is_plausible(
+        query, "Buy Jewelili Button Stud Earrings 10K Yellow Gold, Capri Blue"
+    )
+
+
+def test_rank_e_scooter_prefers_xiaomi_over_10k_lookalikes() -> None:
+    query = "best e scooter under 10k aed"
+    xiaomi = _item(
+        "Xiaomi Electric Scooter 6 Pro",
+        "https://www.noon.com/xiaomi-electric-scooter-6-pro",
+        "noon.com",
+        2111.69,
+        "Xiaomi electric scooter",
+    )
+    crony = _item(
+        "CRONY M365 MAX Electric Scooter",
+        "https://www.noon.com/crony-m365-max",
+        "noon.com",
+        999.0,
+        "electric scooter",
+    )
+    thermometer = _item(
+        "Thermometer for motorcycle scooter M8 10K for UU125 UY125",
+        "https://www.alfashop.ae/thermometer",
+        "alfashop.ae",
+        49.0,
+        "motorcycle scooter thermometer",
+    )
+    washer = _item(
+        "Geepas 10KG Semi Automatic Twin Hub Washer GSWM6467-10K",
+        "https://www.alfashop.ae/washer",
+        "alfashop.ae",
+        499.0,
+        "twin hub washer",
+    )
+    resistor = _item(
+        "100pcs 10k Ohm Resistor 1 4w 25 Watt",
+        "https://desertcart.ae/resistor",
+        "desertcart.ae",
+        None,
+        "metal film resistor",
+    )
+    earrings = _item(
+        "Jewelili Button Stud Earrings 10K Yellow Gold",
+        "https://www.carrefouruae.com/earrings",
+        "carrefouruae.com",
+        None,
+        "10K gold earrings",
+    )
+
+    assert relevance_score(query, xiaomi) > 0.5
+    assert relevance_score(query, crony) > 0.5
+    assert relevance_score(query, thermometer) < 0.2
+    assert relevance_score(query, washer) < 0.2
+    assert relevance_score(query, resistor) < 0.2
+    assert relevance_score(query, earrings) < 0.2
+
+    picks = rank_items(
+        [thermometer, washer, resistor, earrings, crony, xiaomi],
+        query,
+        AppConfig(),
+    )
+    titles = [pick.item.title for pick in picks.answers if pick.item]
+    assert titles
+    joined = " ".join(titles).lower()
+    assert "xiaomi" in joined or "crony" in joined
+    assert "washer" not in joined
+    assert "resistor" not in joined
+    assert "earring" not in joined
+    assert "thermometer" not in joined
+    assert picks.best_overall is not None
+    assert "Electric Scooter" in picks.best_overall.title
+    assert picks.best_price is not None
+    assert picks.best_price.url == crony.url
+    assert any("Interpreted as" in note for note in picks.notes)
