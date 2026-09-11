@@ -123,6 +123,14 @@ def test_us_brand_dotcom_is_foreign_for_uae() -> None:
     )
     assert (
         classify_listing(
+            "https://tajikistan.desertcart.com/products/gt3",
+            "tajikistan.desertcart.com",
+            ae,
+        ).kind
+        == "foreign"
+    )
+    assert (
+        classify_listing(
             "https://www.naveetech.ae/products/gt3",
             "naveetech.ae",
             ae,

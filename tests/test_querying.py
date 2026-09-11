@@ -354,6 +354,35 @@ def test_amazon_ae_keeps_search_title_when_page_drops_gt3() -> None:
     assert fallback.best_overall.source_domain == "amazon.ae"
 
 
+def test_short_amazon_title_prefers_search_title_with_scooter() -> None:
+    query = "navee gt3 electric scooter buy"
+    kept = prefer_query_aware_title(
+        query,
+        "NAVEE GT3",
+        "NAVEE GT3 Pro Electric Scooter for Adults, 60KM Max",
+    )
+    assert "Electric Scooter" in kept
+    amazon = _item(
+        kept,
+        "https://www.amazon.ae/NAVEE-Electric-Suspension-Commuting-Tubeless/dp/B0F1SYDQPP",
+        "amazon.ae",
+        1619.10,
+        "Rideable electric kick scooter",
+    )
+    desert = _item(
+        "Navee Gt3 Electric Scooter For Adults 32km H Speed Quad",
+        "https://tajikistan.desertcart.com/products/728160674-gt3-electric-scooter",
+        "tajikistan.desertcart.com",
+        1541,
+        "navee gt3 electric scooter",
+    )
+    config = AppConfig()
+    config.country_code = "AE"
+    picks = rank_items([desert, amazon], query, config)
+    assert picks.best_overall is not None
+    assert picks.best_overall.source_domain == "amazon.ae"
+
+
 def test_polluted_snippet_does_not_make_unrelated_amazon_plausible() -> None:
     query = "navee gt3 electric scooter buy"
     polluted = "Buy NAVEE GT3 electric scooter online in the UAE"

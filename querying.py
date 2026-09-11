@@ -451,11 +451,16 @@ def prefer_query_aware_title(query: str, extracted: str, fallback: str) -> str:
     if not extracted:
         return fallback
     extracted_missing = missing_required(query, extracted)
-    if not extracted_missing:
-        return extracted
     fallback_missing = missing_required(query, fallback)
-    if len(fallback_missing) < len(extracted_missing):
+    if extracted_missing and len(fallback_missing) < len(extracted_missing):
         return fallback
+    if not fallback_missing and category_matches(query, fallback) and not category_matches(
+        query, extracted
+    ):
+        # Amazon often returns a short og:title (“NAVEE GT3”) without “scooter”.
+        return fallback
+    if extracted_missing:
+        return extracted
     return extracted
 
 

@@ -496,10 +496,9 @@ class PageScraper:
                     item.title = hit.title
                 if query:
                     item.title = prefer_query_aware_title(query, item.title, hit.title)
-                    if missing_required(query, f"{item.title} {item.description}") and (
-                        not missing_hard_required(query, hit.title)
-                    ):
-                        item.description = f"{hit.title}. {item.description}".strip()
+                    cleaned_hit = clean_listing_title(query, hit.title)
+                    if cleaned_hit and cleaned_hit.lower() not in (item.description or "").lower():
+                        item.description = f"{cleaned_hit}. {item.description}".strip()
                 if not item.description:
                     item.description = hit.snippet
                 return item

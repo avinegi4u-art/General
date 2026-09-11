@@ -732,7 +732,15 @@ def _tld_country(host: str) -> Optional[str]:
 def _subdomain_country(host: str) -> Optional[str]:
     """Return a country code when the leftmost label is a country storefront."""
     first = host.split(".")[0]
-    return SUBDOMAIN_COUNTRY.get(first)
+    mapped = SUBDOMAIN_COUNTRY.get(first)
+    if mapped:
+        return mapped
+    if "desertcart" in host:
+        if host.endswith(".ae") or first in {"ae", "uae"}:
+            return "AE"
+        if first not in {"www", "desertcart"}:
+            return "XX"
+    return None
 
 
 def classify_listing(url: str, source_domain: str, country: CountryProfile) -> ListingAvailability:
