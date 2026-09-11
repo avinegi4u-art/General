@@ -7,7 +7,9 @@ from querying import (
     accessory_multiplier,
     expand_shopper_query,
     hit_is_plausible,
+    prefer_query_aware_title,
     precise_search_query,
+    product_core_query,
     query_match_terms,
     required_terms,
     shopping_followup_queries,
@@ -281,3 +283,71 @@ def test_crumb_price_is_not_a_buyable_escooter() -> None:
         "shop electric scooters for kids and adults",
     )
     assert relevance_score(query, crumb) <= 0.22
+
+
+def test_product_core_query_skips_accessory_negatives() -> None:
+    core = product_core_query("navee gt3 electric scooter buy")
+    assert '"navee gt3"' in core
+    assert "electric" in core
+    assert "-mudguard" not in core
+    assert "-kit" not in core
+
+
+def test_amazon_ae_keeps_search_title_when_page_drops_gt3() -> None:
+    query = "navee gt3 electric scooter buy"
+    assert hit_is_plausible(
+        query,
+        "NAVEE Electric Scooter for Adults, 60KM Max",
+        snippet="NAVEE GT3 Pro electric scooter",
+        url="https://www.amazon.ae/NAVEE-Electric-Suspension-Commuting-Tubeless/dp/B0F1SYDQPP",
+    )
+    kept = prefer_query_aware_title(
+        query,
+        "NAVEE Electric Scooter for Adults, 60KM Max Range 1000W",
+        "NAVEE GT3 Pro Electric Scooter for Adults, 60KM Max",
+    )
+    assert "GT3" in kept
+
+    amazon = _item(
+        kept,
+        "https://www.amazon.ae/NAVEE-Electric-Suspension-Commuting-Tubeless/dp/B0F1SYDQPP",
+        "amazon.ae",
+        1619.10,
+        "NAVEE GT3 Pro Electric Scooter for Adults",
+    )
+    us_site = _item(
+        "NAVEE GT3 | Commuter Electric Scooter",
+        "https://www.naveetech.us/products/gt3",
+        "naveetech.us",
+        1541,
+        "NAVEE GT3 electric scooter",
+    )
+    wellbots = _item(
+        "Navee GT3 E-Scooter",
+        "https://www.wellbots.com/products/navee-gt3",
+        "wellbots.com",
+        1541,
+        "Navee GT3 electric scooter",
+    )
+    amazon_no_model = _item(
+        "NAVEE Electric Scooter for Adults, 60KM Max",
+        "https://www.amazon.ae/NAVEE-Electric-Suspension/dp/B0F1SYDQPP",
+        "amazon.ae",
+        1619.10,
+        "Rideable electric kick scooter",
+    )
+    config = AppConfig()
+    config.country_code = "AE"
+    picks = rank_items([us_site, wellbots, amazon], query, config)
+    assert picks.best_overall is not None
+    assert picks.best_overall.source_domain == "amazon.ae"
+    urls = [pick.item.url for pick in picks.answers if pick.item]
+    assert all("naveetech.us" not in url for url in urls)
+    assert all("wellbots.com" not in url for url in urls)
+
+    # Even if the model code never appears, the UAE Amazon brand page stays
+    # eligible so a US storefront cannot win Best match.
+    assert relevance_score(query, amazon_no_model) >= 0.35
+    fallback = rank_items([us_site, wellbots, amazon_no_model], query, config)
+    assert fallback.best_overall is not None
+    assert fallback.best_overall.source_domain == "amazon.ae"

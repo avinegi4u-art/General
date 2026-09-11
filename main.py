@@ -13,6 +13,7 @@ from tabulate import tabulate
 from config import AppConfig, parse_weights
 from location import apply_country, country_from_query, country_from_system
 from models import ProductItem, RankedPicks
+from querying import missing_required, prefer_query_aware_title
 from scraper import PageScraper, items_from_hits
 from scoring import rank_items
 from search import search_web
@@ -216,7 +217,9 @@ def format_table(picks: RankedPicks) -> str:
     return table + "".join(f"\n{line}" for line in extra) + details
 
 
-def _merge_items(primary: list[ProductItem], extra: list[ProductItem]) -> list[ProductItem]:
+def _merge_items(
+    primary: list[ProductItem], extra: list[ProductItem], query: str = ""
+) -> list[ProductItem]:
     """Prefer scraped pages; keep snippet-only listings that were never fetched."""
     by_url: dict[str, ProductItem] = {}
     for item in extra:
@@ -226,6 +229,12 @@ def _merge_items(primary: list[ProductItem], extra: list[ProductItem]) -> list[P
         key = item.url.split("#", 1)[0].rstrip("/")
         existing = by_url.get(key)
         if existing is None or item.scrape_ok or (item.price and not existing.price):
+            if query and existing is not None:
+                item.title = prefer_query_aware_title(query, item.title, existing.title)
+                if missing_required(query, f"{item.title} {item.description}"):
+                    extra_text = f"{existing.title}. {existing.description}".strip(". ")
+                    if extra_text:
+                        item.description = f"{extra_text}. {item.description}".strip()
             by_url[key] = item
     return list(by_url.values())
 
@@ -250,8 +259,8 @@ def run(query: str, config: AppConfig) -> RankedPicks:
             },
         )
     scraper = PageScraper(config)
-    scraped = scraper.scrape_many(hits) if hits else []
-    products = _merge_items(scraped, snippet_items)
+    scraped = scraper.scrape_many(hits, query=query) if hits else []
+    products = _merge_items(scraped, snippet_items, query=query)
     return rank_items(products, query, config)
 
 

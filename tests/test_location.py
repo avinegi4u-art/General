@@ -95,6 +95,42 @@ def test_rank_amazon_ae_over_us_brand_site() -> None:
     assert picks.best_overall.source_domain == "amazon.ae"
 
 
+def test_us_brand_dotcom_is_foreign_for_uae() -> None:
+    ae = get_country("AE")
+    assert (
+        classify_listing(
+            "https://www.naveetech.com/products/gt3",
+            "naveetech.com",
+            ae,
+        ).kind
+        == "foreign"
+    )
+    assert (
+        classify_listing(
+            "https://eu.naveetech.com/products/gt3",
+            "eu.naveetech.com",
+            ae,
+        ).kind
+        == "foreign"
+    )
+    assert (
+        classify_listing(
+            "https://www.wellbots.com/products/navee-gt3",
+            "wellbots.com",
+            ae,
+        ).kind
+        == "foreign"
+    )
+    assert (
+        classify_listing(
+            "https://www.naveetech.ae/products/gt3",
+            "naveetech.ae",
+            ae,
+        ).kind
+        == "local"
+    )
+
+
 def test_us_amazon_is_foreign_for_uae() -> None:
     ae = get_country("AE")
     listing = classify_listing("https://www.amazon.com/dp/B0TEST", "amazon.com", ae)

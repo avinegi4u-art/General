@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup, Tag
 
 from config import AppConfig, PLAUSIBLE_PRICE_RANGE, convert_to_base
 from models import PriceInfo, ProductItem, SearchResult
-from querying import hit_is_plausible
+from querying import hit_is_plausible, missing_required, prefer_query_aware_title
 from search import domain_from_url, looks_like_category_url, looks_like_product_url
 
 logger = logging.getLogger(__name__)
@@ -474,7 +474,7 @@ class PageScraper:
                 time.sleep(0.6 * (attempt + 1))
         return None, last_error or "request failed"
 
-    def scrape_one(self, hit: SearchResult) -> ProductItem:
+    def scrape_one(self, hit: SearchResult, query: str = "") -> ProductItem:
         """Scrape a search hit, falling back to snippet-only data on errors."""
         html, error = self.fetch(hit.url)
         if html:
@@ -488,6 +488,14 @@ class PageScraper:
                 )
                 if not item.title:
                     item.title = hit.title
+                if query:
+                    item.title = prefer_query_aware_title(query, item.title, hit.title)
+                    if missing_required(query, f"{item.title} {item.description}") and (
+                        hit.title or hit.snippet
+                    ):
+                        extra = f"{hit.title}. {hit.snippet}".strip(". ")
+                        if extra:
+                            item.description = f"{extra}. {item.description}".strip()
                 if not item.description:
                     item.description = hit.snippet
                 return item
@@ -511,16 +519,23 @@ class PageScraper:
             error=error,
         )
 
-    def scrape_many(self, hits: list[SearchResult]) -> list[ProductItem]:
+    def scrape_many(self, hits: list[SearchResult], query: str = "") -> list[ProductItem]:
         """Scrape up to ``max_pages`` product pages, skipping shop indexes."""
         items: list[ProductItem] = []
         product_hits = [hit for hit in hits if not looks_like_category_url(hit.url)]
         if len(product_hits) < 3:
             product_hits = list(hits)
+        if query:
+            product_hits.sort(
+                key=lambda hit: (
+                    not hit_is_plausible(query, hit.title, hit.snippet, hit.url),
+                    len(missing_required(query, f"{hit.title} {hit.snippet} {hit.url}")),
+                )
+            )
         limit = min(len(product_hits), self.config.max_pages)
         for index, hit in enumerate(product_hits[:limit]):
             logger.info("Scraping %d/%d %s", index + 1, limit, hit.url)
-            items.append(self.scrape_one(hit))
+            items.append(self.scrape_one(hit, query=query))
             if index < limit - 1:
                 delay = random.uniform(self.config.min_delay_s, self.config.max_delay_s)
                 time.sleep(delay)

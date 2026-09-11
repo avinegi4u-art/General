@@ -104,6 +104,9 @@ MARKETPLACE_HOME: dict[str, str] = {
     "jarir.com": "SA",
     "extra.com": "SA",
     "noon.com": "AE",
+    "naveetech.com": "US",
+    "naveetech.us": "US",
+    "wellbots.com": "US",
 }
 
 # Public suffixes that name a country. Generic .com is not a country.

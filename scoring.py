@@ -20,6 +20,8 @@ from querying import (
     budget_in_base,
     category_matches,
     expand_shopper_query,
+    is_modelish_term,
+    missing_hard_required,
     missing_required,
     query_match_terms,
     required_terms,
@@ -68,9 +70,15 @@ def relevance_score(query: str, item: ProductItem, base_currency: str = "AED") -
     body_part = body_hits / len(query_terms)
     score = 0.70 * title_part + 0.30 * body_part + phrase_bonus + domain_bonus
 
-    if missing_required(query, item.title):
-        # Brand/model missing from the title: this is not the product they asked for.
+    blob = f"{item.title} {item.description} {item.url}"
+    hard_missing = missing_hard_required(query, blob)
+    soft_missing = [term for term in missing_required(query, blob) if is_modelish_term(term)]
+    if hard_missing:
+        # Brand missing from the listing: this is not the product they asked for.
         score = min(score, 0.18) * 0.4
+    elif soft_missing:
+        # Amazon.ae often titles “NAVEE Electric Scooter” without “GT3” in the slug.
+        score = min(score, 0.48)
 
     score *= accessory_multiplier(query, item.title)
     blob = f"{item.title} {item.description}"

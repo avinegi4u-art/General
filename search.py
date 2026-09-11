@@ -487,11 +487,15 @@ def _merge_hits(groups: Iterable[list[SearchResult]]) -> list[SearchResult]:
 def search_marketplace_sites(query: str, config: AppConfig) -> list[SearchResult]:
     """Fan out site-restricted searches so local stores are not missed."""
     from location import get_country, marketplace_site_queries
-    from querying import precise_search_query, shopping_followup_queries
+    from querying import product_core_query, required_terms, shopping_followup_queries
 
     country = get_country(config.country_code)
-    focused = precise_search_query(query)
-    queries = marketplace_site_queries(focused, country)
+    # Negatives like -kit hide amazon.ae product pages. Site searches use brand+model only.
+    core = product_core_query(query)
+    queries = marketplace_site_queries(core, country)
+    req = required_terms(query)
+    if req and country.local_domains:
+        queries.insert(0, f'"{" ".join(req)}" site:{country.local_domains[0]}')
     queries.extend(shopping_followup_queries(query, country.search_terms[0]))
     if not queries:
         return []
@@ -529,7 +533,12 @@ def search_web(query: str, config: AppConfig) -> list[SearchResult]:
     another country's storefronts.
     """
     from location import classify_listing, get_country, localize_query
-    from querying import expand_shopper_query, hit_is_plausible, precise_search_query
+    from querying import (
+        expand_shopper_query,
+        hit_is_plausible,
+        missing_required,
+        precise_search_query,
+    )
 
     country = get_country(config.country_code)
     focused = precise_search_query(query)
@@ -570,6 +579,7 @@ def search_web(query: str, config: AppConfig) -> list[SearchResult]:
     unique.sort(
         key=lambda hit: (
             not hit_is_plausible(query, hit.title, hit.snippet, hit.url),
+            len(missing_required(query, f"{hit.title} {hit.snippet} {hit.url}")),
             not looks_like_product_url(hit.url),
             looks_like_category_url(hit.url),
             {"local": 0, "ships": 1, "unknown": 2, "foreign": 3}[

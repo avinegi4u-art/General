@@ -426,6 +426,38 @@ def missing_required(query: str, text: str) -> list[str]:
     return [term for term in required_terms(query) if not _term_in_text(term, tokens, text)]
 
 
+_MODELISH = re.compile(r"^(?:[a-z]{0,5}\d+[a-z]{0,4}|\d+[a-z]?)$", re.I)
+
+
+def is_modelish_term(term: str) -> bool:
+    """True for model codes such as ``gt3``, ``10+``, or ``s2`` — not brand names."""
+    if term.endswith("+"):
+        return True
+    return bool(_MODELISH.fullmatch(term))
+
+
+def missing_hard_required(query: str, text: str) -> list[str]:
+    """Brand words that must appear; model codes may be missing from a URL slug."""
+    return [term for term in missing_required(query, text) if not is_modelish_term(term)]
+
+
+def prefer_query_aware_title(query: str, extracted: str, fallback: str) -> str:
+    """Keep the search title when the scraped heading dropped the model name."""
+    extracted = (extracted or "").strip()
+    fallback = (fallback or "").strip()
+    if not fallback:
+        return extracted
+    if not extracted:
+        return fallback
+    extracted_missing = missing_required(query, extracted)
+    if not extracted_missing:
+        return extracted
+    fallback_missing = missing_required(query, fallback)
+    if len(fallback_missing) < len(extracted_missing):
+        return fallback
+    return extracted
+
+
 def accessory_multiplier(query: str, title: str) -> float:
     """1.0 for a complete product; a small factor when the title is a spare part."""
     if query_wants_parts(query):
@@ -462,6 +494,18 @@ def shopping_followup_queries(query: str, country_term: str) -> list[str]:
     from intent import catalog_search_queries
 
     return catalog_search_queries(query, country_term)
+
+
+def product_core_query(query: str) -> str:
+    """Brand and product words only — used with site:amazon.ae so negatives do not hide listings."""
+    required = required_terms(query)
+    generic = [term for term in query_match_terms(query) if term in GENERIC_TERMS][:3]
+    if required:
+        core = f'"{" ".join(required)}"'
+        if generic:
+            core = f"{core} {' '.join(generic)}"
+        return core
+    return " ".join(query_match_terms(query)) or expand_shopper_query(query)
 
 
 def precise_search_query(query: str) -> str:
@@ -505,14 +549,12 @@ def precise_search_query(query: str) -> str:
 def hit_is_plausible(query: str, title: str, snippet: str = "", url: str = "") -> bool:
     """Cheap pre-scrape check: brand present and not an obvious spare part.
 
-    Plus-models such as ``10+`` are optional here so official pages like
-    ``vsett.com/product/5`` are not dropped before we can read the title.
+    Model codes (``10+``, ``gt3``) are optional here so marketplace pages whose
+    URL slug is “NAVEE Electric Scooter” are not dropped before we can rank them.
     """
     slug = url.replace("-", " ").replace("/", " ").replace("_", " ")
     blob = f"{title} {snippet} {slug}"
-    missing = missing_required(query, blob)
-    missing_brand = [term for term in missing if not term.endswith("+")]
-    if missing_brand:
+    if missing_hard_required(query, blob):
         return False
     if accessory_multiplier(query, f"{title} {slug}") < 0.5:
         return False
