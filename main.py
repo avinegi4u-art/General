@@ -13,7 +13,7 @@ from tabulate import tabulate
 from config import AppConfig, parse_weights
 from location import apply_country, country_from_query, country_from_system
 from models import ProductItem, RankedPicks
-from scraper import PageScraper
+from scraper import PageScraper, items_from_hits
 from scoring import rank_items
 from search import search_web
 
@@ -174,6 +174,8 @@ def format_table(picks: RankedPicks) -> str:
     )
     if picks.notes:
         extra.append("Notes: " + " ".join(picks.notes))
+    if picks.overview:
+        extra.insert(0, "Overview: " + picks.overview)
 
     detail_rows = []
     for item in picks.items[:8]:
@@ -214,10 +216,25 @@ def format_table(picks: RankedPicks) -> str:
     return table + "".join(f"\n{line}" for line in extra) + details
 
 
+def _merge_items(primary: list[ProductItem], extra: list[ProductItem]) -> list[ProductItem]:
+    """Prefer scraped pages; keep snippet-only listings that were never fetched."""
+    by_url: dict[str, ProductItem] = {}
+    for item in extra:
+        key = item.url.split("#", 1)[0].rstrip("/")
+        by_url[key] = item
+    for item in primary:
+        key = item.url.split("#", 1)[0].rstrip("/")
+        existing = by_url.get(key)
+        if existing is None or item.scrape_ok or (item.price and not existing.price):
+            by_url[key] = item
+    return list(by_url.values())
+
+
 def run(query: str, config: AppConfig) -> RankedPicks:
-    """Search → scrape → score → rank."""
+    """Search → hydrate snippets → scrape product pages → score → rank."""
     hits = search_web(query, config)
-    if not hits:
+    snippet_items = items_from_hits(query, hits, config)
+    if not hits and not snippet_items:
         logger.warning("No search results for %r", query)
         return RankedPicks(
             query=query,
@@ -233,7 +250,8 @@ def run(query: str, config: AppConfig) -> RankedPicks:
             },
         )
     scraper = PageScraper(config)
-    products = scraper.scrape_many(hits)
+    scraped = scraper.scrape_many(hits) if hits else []
+    products = _merge_items(scraped, snippet_items)
     return rank_items(products, query, config)
 
 

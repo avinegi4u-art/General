@@ -99,6 +99,7 @@ def test_json_payload_contains_categories() -> None:
     ]
     payload = rank_items(items, "wireless earbuds", config).to_dict()
     assert payload["items_considered"] == 2
+    assert payload["overview"]
     assert "best_price" in payload["categories"]
     assert "best_overall" in payload["categories"]
     assert "best_value" in payload["categories"]

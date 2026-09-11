@@ -7,6 +7,12 @@ from statistics import median
 from typing import Optional
 
 from config import AppConfig, ScoreWeights
+from intent import (
+    build_overview,
+    popular_model_bonus,
+    price_outside_band,
+    spec_collides_with_budget,
+)
 from location import classify_listing, get_country, is_buyable
 from models import LabeledPick, ProductItem, RankedPicks, ScoreBreakdown
 from querying import (
@@ -22,7 +28,7 @@ from querying import (
 from search import looks_like_category_url
 
 
-def relevance_score(query: str, item: ProductItem) -> float:
+def relevance_score(query: str, item: ProductItem, base_currency: str = "AED") -> float:
     """0–1 score based on query-term overlap, with brand/model required.
 
     Title matches weigh more than body matches. Spare parts (“compatible with
@@ -71,9 +77,21 @@ def relevance_score(query: str, item: ProductItem) -> float:
     if not category_matches(query, blob):
         # Washers, resistors, 10K gold, motorcycle thermometers, etc.
         score = min(score, 0.14) * 0.3
+    elif spec_collides_with_budget(query, blob):
+        # “10000W scooter” is not a 10000 AED budget match.
+        score = min(score, 0.16) * 0.35
     elif looks_like_category_url(item.url):
         # A shop index is not a product to buy.
         score *= 0.4
+    else:
+        score = min(1.0, score + popular_model_bonus(query, item.title))
+    if (
+        item.price_base
+        and item.price_base > 0
+        and price_outside_band(query, item.price_base, base_currency)
+    ):
+        # Category crumbs (AED 25 “electric scooters”) cannot win Best price.
+        score = min(score, 0.22)
     return round(min(1.0, max(0.0, score)), 4)
 
 
@@ -116,7 +134,7 @@ def apply_scores(
         item.availability_label = listing.label
         avail_s = listing.score
 
-        rel = relevance_score(query, item)
+        rel = relevance_score(query, item, config.base_currency)
 
         if item.price_base and item.price_base > 0:
             price_s = _log_price_score(max(item.price_base, 0.01), max(lo, 0.01), hi)
@@ -302,6 +320,7 @@ def rank_items(
         rated_sorted=rated_sorted,
     )
     also_consider = next((pick.item for pick in answers if pick.key.startswith("also")), None)
+    overview = build_overview(query, country.name, config.base_currency, answers)
 
     return RankedPicks(
         query=query,
@@ -315,6 +334,7 @@ def rank_items(
         best_rated=best_rated,
         also_consider=also_consider,
         answers=answers,
+        overview=overview,
         weights={
             "relevance": weights.relevance,
             "price": weights.price,

@@ -106,7 +106,14 @@ FindBest ranks listings you can actually buy:
 2. **Ships to your country** — overseas sellers that deliver there, such as AliExpress.
 3. **Other-country storefronts** (amazon.com when you are in the UAE, Flipkart when you are in the UAE, and so on) are hidden from the top picks when enough local or deliverable items exist.
 
-The web app uses this device’s time zone (and IP/language if needed). There is no location dropdown. On the CLI, omit `--country` to use the system time zone, or pass `--country AE`. Currency follows the country unless you override it.
+The web app uses **currency or place words in the query** when you type them
+(`under 10k aed` shops the UAE even from a US device). Otherwise it uses this
+device’s time zone. There is no location dropdown. On the CLI, omit `--country`
+to use the system time zone, or pass `--country AE`.
+
+A short **overview** (like a shopping AI summary) is returned with the top 5
+picks. `e scooter under 10k` is read as electric scooters under 10000, not 10K
+gold or 10k-ohm resistors.
 
 ```bash
 python main.py --query "wireless earbuds" --country AE

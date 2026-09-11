@@ -124,6 +124,7 @@ class RankedPicks:
     best_rated: Optional[ProductItem] = None
     also_consider: Optional[ProductItem] = None
     answers: list[LabeledPick] = field(default_factory=list)
+    overview: str = ""
     weights: dict[str, float] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
@@ -139,6 +140,7 @@ class RankedPicks:
             "weights": self.weights,
             "items_considered": len(self.items),
             "notes": self.notes,
+            "overview": self.overview,
             "categories": {
                 "best_price": item_or_none(self.best_price),
                 "best_overall": item_or_none(self.best_overall),

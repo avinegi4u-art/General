@@ -140,7 +140,7 @@ def test_e_scooter_under_10k_is_not_a_10k_token_search() -> None:
     assert "-mobility" in rewritten
 
     follows = shopping_followup_queries(query, "UAE")
-    assert any("xiaomi" in item for item in follows)
+    assert any("xiaomi" in item.lower() for item in follows)
 
     assert hit_is_plausible(query, "Xiaomi Electric Scooter 6 Pro")
     assert hit_is_plausible(query, "CRONY M365 MAX Electric Scooter")
@@ -249,3 +249,35 @@ def test_category_index_does_not_beat_named_scooter() -> None:
     assert "Xiaomi" in picks.best_overall.title
     assert picks.best_price is not None
     assert picks.best_price.url == xiaomi.url
+
+
+def test_10000w_listing_is_not_a_10000_aed_budget_match() -> None:
+    query = "best e scooter under 10k aed"
+    watts = _item(
+        "EU Powerful 10000W Dual Motor 72V Electric Scooter",
+        "https://www.aliexpress.com/item/1005009770906478.html",
+        "aliexpress.com",
+        2800,
+        "10000W dual motor electric scooter",
+    )
+    xiaomi = _item(
+        "Xiaomi Electric Scooter 6 Pro",
+        "https://www.noon.com/xiaomi-electric-scooter-6-pro",
+        "noon.com",
+        2111,
+        "Xiaomi electric scooter",
+    )
+    assert relevance_score(query, watts) < 0.2
+    assert relevance_score(query, xiaomi) > relevance_score(query, watts)
+
+
+def test_crumb_price_is_not_a_buyable_escooter() -> None:
+    query = "best e scooter under 10k aed"
+    crumb = _item(
+        "Electric Scooters – Best Buy",
+        "https://www.bestbuy.com/site/electric-scooters/pcmcat123",
+        "bestbuy.com",
+        25,
+        "shop electric scooters for kids and adults",
+    )
+    assert relevance_score(query, crumb) <= 0.22

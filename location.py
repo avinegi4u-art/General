@@ -611,13 +611,18 @@ def resolve_country(
     timezone: str | None = None,
     locale: str | None = None,
 ) -> CountryProfile:
-    """Pick a country from the device first, then IP / language, then extras.
+    """Pick a country from the query market first, then this device.
 
-    The shopper is not asked to choose a location. Time zone (system clock)
-    wins over query currency words so a search box never substitutes for geo.
+    The shopper is not asked to choose a location. An explicit currency or
+    place in the query (AED, India, “in Dubai”) selects that market — the same
+    way searching “under 10k aed” should shop the UAE from any device. When the
+    query has no place signal, the device time zone wins.
     """
     if explicit:
         return apply_country(config, explicit)
+    hinted = country_from_query(query)
+    if hinted:
+        return apply_country(config, hinted)
     from_tz = country_from_timezone(timezone)
     if from_tz:
         return apply_country(config, from_tz)
@@ -630,9 +635,6 @@ def resolve_country(
     env_code = os.getenv("PRODUCT_FINDER_COUNTRY", "").strip()
     if env_code:
         return apply_country(config, env_code)
-    hinted = country_from_query(query)
-    if hinted:
-        return apply_country(config, hinted)
     return apply_country(config, config.country_code or "AE")
 
 

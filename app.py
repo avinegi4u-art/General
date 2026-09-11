@@ -58,6 +58,7 @@ def _card_payload(picks_dict: dict[str, Any]) -> dict[str, Any]:
         "country_name": picks_dict.get("country_name"),
         "items_considered": picks_dict.get("items_considered", 0),
         "notes": picks_dict.get("notes") or [],
+        "overview": picks_dict.get("overview") or "",
         "picks": answers,
         "items": picks_dict.get("items") or [],
     }

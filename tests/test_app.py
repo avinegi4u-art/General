@@ -17,6 +17,7 @@ def test_index_renders_search_form() -> None:
     assert "FindBest" in html
     assert 'id="search-form"' in html
     assert 'id="location-line"' in html
+    assert 'id="overview"' in html
     assert 'id="country"' not in html
     assert "Deliver to" not in html
 

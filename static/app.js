@@ -4,6 +4,7 @@ const searchBtn = document.getElementById("search-btn");
 const statusEl = document.getElementById("status");
 const errorEl = document.getElementById("error");
 const notesEl = document.getElementById("notes");
+const overviewEl = document.getElementById("overview");
 const picksEl = document.getElementById("picks");
 const moreEl = document.getElementById("more");
 const moreList = document.getElementById("more-list");
@@ -90,7 +91,6 @@ function renderCard(pick) {
       </article>
     `;
   }
-  const scores = item.scores || {};
   return `
     <article class="card ${escapeHtml(pick.id)}">
       <p class="badge">${escapeHtml(pick.label)}</p>
@@ -99,7 +99,6 @@ function renderCard(pick) {
       <p class="meta">${escapeHtml(item.source_domain)} · ${escapeHtml(formatRating(item))}</p>
       <p class="price">${escapeHtml(formatPrice(item))}</p>
       <p class="why">${escapeHtml(item.description || pick.blurb)}</p>
-      <p class="scores">Match ${Number(scores.relevance || 0).toFixed(2)} · Price ${Number(scores.price || 0).toFixed(2)} · Ships ${Number(scores.availability || 0).toFixed(2)} · Overall ${Number(scores.overall || 0).toFixed(2)}</p>
       <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">Open listing</a>
     </article>
   `;
@@ -185,6 +184,10 @@ async function hydrateLocation() {
 async function runSearch(query) {
   hide(errorEl);
   hide(notesEl);
+  if (overviewEl) {
+    hide(overviewEl);
+    overviewEl.innerHTML = "";
+  }
   picksEl.hidden = true;
   hide(moreEl);
   const where = detected.name || "your location";
@@ -222,6 +225,10 @@ async function runSearch(query) {
       showLocation(data.country_name, data.base_currency);
     }
     hide(statusEl);
+    if (data.overview && overviewEl) {
+      overviewEl.innerHTML = `<h2>Overview</h2><p>${escapeHtml(data.overview)}</p>`;
+      overviewEl.hidden = false;
+    }
     picksEl.innerHTML = (data.picks || []).map(renderCard).join("");
     picksEl.hidden = false;
     const winnerItems = (data.picks || []).map((pick) => pick.item);

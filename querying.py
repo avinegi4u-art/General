@@ -459,13 +459,9 @@ def category_search_negatives(query: str) -> tuple[str, ...]:
 
 def shopping_followup_queries(query: str, country_term: str) -> list[str]:
     """Named-product searches so ranking sees listings, not category indexes."""
-    if not wants_electric_scooter(query):
-        return []
-    place = country_term.strip()
-    return [
-        f'xiaomi "electric scooter" {place}',
-        f'(segway OR ninebot OR kugoo OR crony) "electric scooter" {place}',
-    ]
+    from intent import catalog_search_queries
+
+    return catalog_search_queries(query, country_term)
 
 
 def precise_search_query(query: str) -> str:

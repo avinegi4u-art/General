@@ -13,7 +13,8 @@ from bs4 import BeautifulSoup, Tag
 
 from config import AppConfig, PLAUSIBLE_PRICE_RANGE, convert_to_base
 from models import PriceInfo, ProductItem, SearchResult
-from search import domain_from_url
+from querying import hit_is_plausible
+from search import domain_from_url, looks_like_category_url, looks_like_product_url
 
 logger = logging.getLogger(__name__)
 
@@ -511,15 +512,41 @@ class PageScraper:
         )
 
     def scrape_many(self, hits: list[SearchResult]) -> list[ProductItem]:
-        """Scrape up to ``max_pages`` results with a small random delay between requests."""
+        """Scrape up to ``max_pages`` product pages, skipping shop indexes."""
         items: list[ProductItem] = []
-        limit = min(len(hits), self.config.max_pages)
-        for index, hit in enumerate(hits[:limit]):
+        product_hits = [hit for hit in hits if not looks_like_category_url(hit.url)]
+        if len(product_hits) < 3:
+            product_hits = list(hits)
+        limit = min(len(product_hits), self.config.max_pages)
+        for index, hit in enumerate(product_hits[:limit]):
             logger.info("Scraping %d/%d %s", index + 1, limit, hit.url)
             items.append(self.scrape_one(hit))
             if index < limit - 1:
                 delay = random.uniform(self.config.min_delay_s, self.config.max_delay_s)
                 time.sleep(delay)
         return items
+
+
+def items_from_hits(query: str, hits: list[SearchResult], config: AppConfig) -> list[ProductItem]:
+    """Turn search snippets into products so ranking can start before a scrape."""
+    items: list[ProductItem] = []
+    for hit in hits:
+        if looks_like_category_url(hit.url) and not looks_like_product_url(hit.url):
+            continue
+        if not hit_is_plausible(query, hit.title, hit.snippet, hit.url):
+            continue
+        blob = f"{hit.title} {hit.snippet}"
+        items.append(
+            ProductItem(
+                title=hit.title,
+                url=hit.url,
+                source_domain=hit.source_domain or domain_from_url(hit.url),
+                description=hit.snippet,
+                price=parse_price(blob, config.base_currency, config.base_currency),
+                rating=parse_rating(blob),
+                scrape_ok=False,
+            )
+        )
+    return items
 
 
