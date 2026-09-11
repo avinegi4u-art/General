@@ -232,11 +232,22 @@ def rank_items(
     preferred = [item for item in pool if is_buyable(item.availability)]
     unknown = [item for item in pool if item.availability == "unknown"]
     if preferred:
-        catalogue = preferred
-        dropped = len(pool) - len(preferred)
-        if dropped:
+        foreign_dropped = len(pool) - len(preferred)
+        in_band = [
+            item
+            for item in preferred
+            if not item.price_base
+            or not price_outside_band(query, item.price_base, config.base_currency)
+        ]
+        if in_band and len(in_band) < len(preferred):
             notes.append(
-                f"Hid {dropped} listing(s) from other countries that may not ship to "
+                "Hid listings whose prices were far outside a buyable range for this product."
+            )
+            preferred = in_band
+        catalogue = preferred
+        if foreign_dropped:
+            notes.append(
+                f"Hid {foreign_dropped} listing(s) from other countries that may not ship to "
                 f"{country.name}. Showing stores in {country.name} and sellers that "
                 f"deliver there (for example AliExpress)."
             )

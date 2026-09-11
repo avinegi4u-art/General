@@ -38,6 +38,15 @@ def test_brand_query_searches_local_market() -> None:
     assert "uae" in blob
 
 
+def test_vsett_scooter_buy_is_an_electric_scooter_search() -> None:
+    from querying import wants_electric_scooter
+
+    assert wants_electric_scooter("vsett scooter buy")
+    intent = parse_intent("vsett scooter buy")
+    assert intent.category is not None
+    assert intent.category.key == "electric_scooter"
+
+
 def test_spec_collision_watts_and_ohms() -> None:
     query = "best e scooter under 10k aed"
     assert spec_collides_with_budget(query, "10000W Dual Motor Electric Scooter")

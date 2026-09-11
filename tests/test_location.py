@@ -265,8 +265,18 @@ def test_rank_vsett_from_uae_hub_over_unrelated() -> None:
         price=PriceInfo(amount=35, currency="AED", original_text="AED 35", amount_base=35),
         rating=4.9,
     )
-    picks = rank_items([mudguard, hub], "vsett scooter buy", config)
+    crumb = ProductItem(
+        title="VSETT Mini Electric Scooter 36V 7.8Ah 350W",
+        url="https://www.e-scooteruaehub.com/products/vsett-mini",
+        source_domain="e-scooteruaehub.com",
+        description="vsett mini electric scooter",
+        price=PriceInfo(amount=350, currency="INR", original_text="350 INR", amount_base=15.4),
+        rating=3.5,
+    )
+    picks = rank_items([mudguard, crumb, hub], "vsett scooter buy", config)
     assert picks.best_overall is not None
     assert picks.best_overall.source_domain == "e-scooteruaehub.com"
+    assert "Mini" not in picks.best_overall.title
     assert picks.best_price is not None
     assert picks.best_price.source_domain == "e-scooteruaehub.com"
+    assert (picks.best_price.price_base or 0) > 400

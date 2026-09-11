@@ -361,12 +361,18 @@ def query_wants_parts(query: str) -> bool:
 
 
 def wants_electric_scooter(query: str) -> bool:
-    """True for “e scooter”, “e-scooter”, or “electric scooter” shopping queries."""
+    """True for e-scooter shopping, including “vsett scooter buy” brand searches."""
     lowered = query.lower()
     if _E_SCOOTER.search(lowered):
         return True
     tokens = set(tokenize(expand_shopper_query(query)))
-    return "electric" in tokens and "scooter" in tokens
+    if "electric" in tokens and "scooter" in tokens:
+        return True
+    if query_wants_parts(query):
+        return False
+    if ("scooter" in tokens or "scooters" in tokens) and required_terms(query):
+        return True
+    return False
 
 
 def looks_like_electric_scooter(text: str) -> bool:
