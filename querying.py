@@ -444,8 +444,8 @@ def missing_hard_required(query: str, text: str) -> list[str]:
 
 def prefer_query_aware_title(query: str, extracted: str, fallback: str) -> str:
     """Keep the search title when the scraped heading dropped the model name."""
-    extracted = (extracted or "").strip()
-    fallback = (fallback or "").strip()
+    extracted = clean_listing_title(query, extracted)
+    fallback = clean_listing_title(query, fallback)
     if not fallback:
         return extracted
     if not extracted:
@@ -457,6 +457,24 @@ def prefer_query_aware_title(query: str, extracted: str, fallback: str) -> str:
     if len(fallback_missing) < len(extracted_missing):
         return fallback
     return extracted
+
+
+def clean_listing_title(query: str, title: str) -> str:
+    """Take the first product name when a search hit concatenates several titles."""
+    text = re.sub(r"\s+", " ", (title or "")).strip(" .")
+    if not text:
+        return ""
+    parts = [part.strip(" .") for part in re.split(r"\s*\.{2,}\s*", text) if part.strip(" .")]
+    if len(parts) <= 1 and " | " not in text:
+        return text[:180].rstrip()
+    candidates = parts if len(parts) > 1 else [p.strip() for p in text.split(" | ") if p.strip()]
+    req = required_terms(query)
+    for part in candidates:
+        if req and missing_hard_required(query, part):
+            continue
+        if looks_like_electric_scooter(part) or not req:
+            return part[:160].rstrip()
+    return (candidates[0] if candidates else text)[:160].rstrip()
 
 
 def accessory_multiplier(query: str, title: str) -> float:

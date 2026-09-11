@@ -13,7 +13,13 @@ from bs4 import BeautifulSoup, Tag
 
 from config import AppConfig, PLAUSIBLE_PRICE_RANGE, convert_to_base
 from models import PriceInfo, ProductItem, SearchResult
-from querying import hit_is_plausible, missing_hard_required, missing_required, prefer_query_aware_title
+from querying import (
+    clean_listing_title,
+    hit_is_plausible,
+    missing_hard_required,
+    missing_required,
+    prefer_query_aware_title,
+)
 from search import domain_from_url, looks_like_category_url, looks_like_product_url
 
 logger = logging.getLogger(__name__)
@@ -507,7 +513,7 @@ class PageScraper:
         )
         fallback_rating = parse_rating(f"{hit.title} {hit.snippet}")
         return ProductItem(
-            title=hit.title,
+            title=clean_listing_title(query, hit.title) if query else hit.title,
             url=hit.url,
             source_domain=hit.source_domain or domain_from_url(hit.url),
             description=hit.snippet,
@@ -558,7 +564,7 @@ def items_from_hits(query: str, hits: list[SearchResult], config: AppConfig) -> 
         blob = f"{hit.title} {hit.snippet}"
         items.append(
             ProductItem(
-                title=hit.title,
+                title=clean_listing_title(query, hit.title),
                 url=hit.url,
                 source_domain=hit.source_domain or domain_from_url(hit.url),
                 description=hit.snippet,

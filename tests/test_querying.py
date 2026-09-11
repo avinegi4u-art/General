@@ -5,6 +5,7 @@ from __future__ import annotations
 from models import PriceInfo, ProductItem
 from querying import (
     accessory_multiplier,
+    clean_listing_title,
     expand_shopper_query,
     hit_is_plausible,
     prefer_query_aware_title,
@@ -395,3 +396,16 @@ def test_polluted_snippet_does_not_make_unrelated_amazon_plausible() -> None:
     assert picks.best_overall.source_domain == "amazon.ae"
     assert "REALMAX" not in picks.best_overall.title
     assert "controller" not in picks.best_overall.title.lower()
+
+
+def test_concatenated_search_title_keeps_the_first_product_name() -> None:
+    query = "navee gt3 electric scooter buy"
+    messy = (
+        "NAVEE GT3 Pro Electric Scooter for Adults, 60KM Max Range "
+        "...NAVEE GT3 Pro Electric Scooter, e Scooter, 1000w 800w Motor "
+        "...NAVEE GT3 Pro Electric Scooter: Confident Control on Slippery Surfaces"
+    )
+    cleaned = clean_listing_title(query, messy)
+    assert cleaned.startswith("NAVEE GT3 Pro Electric Scooter for Adults")
+    assert "Confident Control" not in cleaned
+    assert "1000w" not in cleaned.lower()
