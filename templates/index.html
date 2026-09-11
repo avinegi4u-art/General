@@ -12,10 +12,9 @@
         <p class="eyebrow">Local stores · ships to you · AliExpress and similar</p>
         <h1>FindBest</h1>
         <p class="lede">
-          Type what you want. We rank the <strong>top 5</strong> from stores in
-          <strong>your country</strong>, plus overseas sellers that deliver there
-          (for example AliExpress). Other-country listings that will not ship to
-          you are pushed aside.
+          Type what you want. We use <strong>this device’s location</strong>
+          and rank the <strong>top 5</strong> from stores there, plus overseas
+          sellers that deliver to you (for example AliExpress).
         </p>
       </header>
 
@@ -28,52 +27,15 @@
             type="search"
             required
             maxlength="200"
-            placeholder="e.g. wireless earbuds under 200 AED"
+            placeholder="e.g. wireless earbuds"
             autocomplete="off"
           />
           <button type="submit" id="search-btn">Search</button>
         </div>
         <div class="controls">
-          <label>
-            Deliver to
-            <select id="country" name="country">
-              {% for country in countries %}
-              <option
-                value="{{ country.code }}"
-                data-currency="{{ country.currency }}"
-                {% if country.code == "AE" %}selected{% endif %}
-              >
-                {{ country.name }}
-              </option>
-              {% endfor %}
-            </select>
-          </label>
-          <label>
-            Currency
-            <select id="currency" name="base_currency">
-              <option value="AED" selected>AED</option>
-              <option value="USD">USD</option>
-              <option value="EUR">EUR</option>
-              <option value="GBP">GBP</option>
-              <option value="INR">INR</option>
-              <option value="SAR">SAR</option>
-              <option value="QAR">QAR</option>
-              <option value="KWD">KWD</option>
-              <option value="BHD">BHD</option>
-              <option value="OMR">OMR</option>
-              <option value="EGP">EGP</option>
-              <option value="PKR">PKR</option>
-              <option value="CAD">CAD</option>
-              <option value="AUD">AUD</option>
-            </select>
-          </label>
-          <p class="hint">Local stores first, then sellers that ship to your country.</p>
+          <p id="location-line" class="location-line">Using this device’s location…</p>
         </div>
-        <div class="chips" aria-label="Example searches">
-          {% for example in examples %}
-          <button type="button" class="chip" data-query="{{ example }}">{{ example }}</button>
-          {% endfor %}
-        </div>
+        <div class="chips" aria-label="Example searches"></div>
       </form>
 
       <p id="status" class="status" hidden></p>

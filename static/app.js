@@ -1,7 +1,5 @@
 const form = document.getElementById("search-form");
 const queryInput = document.getElementById("query");
-const countrySelect = document.getElementById("country");
-const currencySelect = document.getElementById("currency");
 const searchBtn = document.getElementById("search-btn");
 const statusEl = document.getElementById("status");
 const errorEl = document.getElementById("error");
@@ -9,27 +7,7 @@ const notesEl = document.getElementById("notes");
 const picksEl = document.getElementById("picks");
 const moreEl = document.getElementById("more");
 const moreList = document.getElementById("more-list");
-
-const TZ_TO_COUNTRY = {
-  "Asia/Dubai": "AE",
-  "Asia/Muscat": "OM",
-  "Asia/Riyadh": "SA",
-  "Asia/Qatar": "QA",
-  "Asia/Kuwait": "KW",
-  "Asia/Bahrain": "BH",
-  "Africa/Cairo": "EG",
-  "Asia/Kolkata": "IN",
-  "Asia/Calcutta": "IN",
-  "Asia/Karachi": "PK",
-  "America/New_York": "US",
-  "America/Chicago": "US",
-  "America/Denver": "US",
-  "America/Los_Angeles": "US",
-  "Europe/London": "GB",
-  "Europe/Berlin": "DE",
-  "America/Toronto": "CA",
-  "Australia/Sydney": "AU",
-};
+const locationLine = document.getElementById("location-line");
 
 const COUNTRY_EXAMPLES = {
   AE: ["wireless earbuds under 200 AED", "noise cancelling headphones", "office chair under 500 AED"],
@@ -40,7 +18,11 @@ const COUNTRY_EXAMPLES = {
   QA: ["wireless earbuds under 200 QAR", "noise cancelling headphones"],
 };
 
-let currencyTouched = false;
+const detected = {
+  country: "",
+  name: "",
+  currency: "",
+};
 
 function show(el, text) {
   el.hidden = false;
@@ -60,6 +42,18 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function systemTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch {
+    return "";
+  }
+}
+
+function systemLocale() {
+  return navigator.language || "";
 }
 
 function formatRating(item) {
@@ -135,26 +129,10 @@ function renderMore(items, winners) {
   moreEl.hidden = false;
 }
 
-function syncCurrencyFromCountry() {
-  if (currencyTouched) {
-    return;
-  }
-  const option = countrySelect.selectedOptions[0];
-  const currency = option?.dataset.currency;
-  if (!currency) {
-    return;
-  }
-  const match = [...currencySelect.options].find((item) => item.value === currency);
-  if (match) {
-    currencySelect.value = currency;
-  }
-}
-
-function updateChips() {
-  const code = countrySelect.value;
-  const examples = COUNTRY_EXAMPLES[code];
+function updateChips(code) {
+  const examples = COUNTRY_EXAMPLES[code] || COUNTRY_EXAMPLES.US || ["noise cancelling headphones"];
   const chips = document.querySelector(".chips");
-  if (!chips || !examples) {
+  if (!chips) {
     return;
   }
   chips.innerHTML = examples
@@ -168,44 +146,40 @@ function updateChips() {
   });
 }
 
-function detectCountry() {
-  const stored = localStorage.getItem("findbest_country");
-  if (stored && [...countrySelect.options].some((item) => item.value === stored)) {
-    return stored;
+function showLocation(name, currency) {
+  if (!locationLine) {
+    return;
   }
-  try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (TZ_TO_COUNTRY[tz] && [...countrySelect.options].some((item) => item.value === TZ_TO_COUNTRY[tz])) {
-      return TZ_TO_COUNTRY[tz];
-    }
-  } catch {
-    /* ignore */
-  }
-  const lang = (navigator.language || "").split("-")[1];
-  if (lang && [...countrySelect.options].some((item) => item.value === lang.toUpperCase())) {
-    return lang.toUpperCase();
-  }
-  return countrySelect.value;
+  locationLine.textContent = `Shopping in ${name} · ${currency} (from this device)`;
 }
 
-async function hydrateCountry() {
-  let code = detectCountry();
+async function hydrateLocation() {
+  const tz = systemTimezone();
+  const locale = systemLocale();
+  const params = new URLSearchParams();
+  if (tz) {
+    params.set("tz", tz);
+  }
+  if (locale) {
+    params.set("locale", locale);
+  }
   try {
-    const response = await fetch("/api/geo");
+    const response = await fetch(`/api/geo?${params.toString()}`, {
+      headers: { "X-Timezone": tz },
+    });
     if (response.ok) {
       const data = await response.json();
-      if (!localStorage.getItem("findbest_country") && data.country) {
-        code = data.country;
-      }
+      detected.country = data.country || "";
+      detected.name = data.name || "";
+      detected.currency = data.currency || "";
+      showLocation(detected.name, detected.currency);
+      updateChips(detected.country);
+      return;
     }
   } catch {
-    /* keep timezone guess */
+    /* fall through */
   }
-  if ([...countrySelect.options].some((item) => item.value === code)) {
-    countrySelect.value = code;
-  }
-  syncCurrencyFromCountry();
-  updateChips();
+  locationLine.textContent = "Shopping with this device’s location";
 }
 
 async function runSearch(query) {
@@ -213,21 +187,24 @@ async function runSearch(query) {
   hide(notesEl);
   picksEl.hidden = true;
   hide(moreEl);
-  const countryName = countrySelect.selectedOptions[0]?.textContent?.trim() || "your country";
+  const where = detected.name || "your location";
   show(
     statusEl,
-    `Searching stores in ${countryName} and sellers that ship there. This can take 15–30 seconds…`
+    `Searching stores in ${where} and sellers that ship there. This can take 15–30 seconds…`
   );
   searchBtn.disabled = true;
 
   try {
     const response = await fetch("/api/search", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Timezone": systemTimezone(),
+      },
       body: JSON.stringify({
         query,
-        country: countrySelect.value,
-        base_currency: currencySelect.value,
+        time_zone: systemTimezone(),
+        locale: systemLocale(),
         max_pages: 8,
       }),
     });
@@ -237,6 +214,12 @@ async function runSearch(query) {
     }
     if (data.error && !data.picks) {
       throw new Error(data.error);
+    }
+    if (data.country_name && data.base_currency) {
+      detected.name = data.country_name;
+      detected.country = data.country_code || detected.country;
+      detected.currency = data.base_currency;
+      showLocation(data.country_name, data.base_currency);
     }
     hide(statusEl);
     picksEl.innerHTML = (data.picks || []).map(renderCard).join("");
@@ -265,21 +248,4 @@ form.addEventListener("submit", (event) => {
   }
 });
 
-currencySelect.addEventListener("change", () => {
-  currencyTouched = true;
-});
-
-countrySelect.addEventListener("change", () => {
-  localStorage.setItem("findbest_country", countrySelect.value);
-  syncCurrencyFromCountry();
-  updateChips();
-});
-
-document.querySelectorAll(".chip").forEach((chip) => {
-  chip.addEventListener("click", () => {
-    queryInput.value = chip.dataset.query || chip.textContent;
-    queryInput.focus();
-  });
-});
-
-hydrateCountry();
+hydrateLocation();

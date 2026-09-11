@@ -7,6 +7,7 @@ from location import (
     classify_listing,
     country_from_headers,
     country_from_query,
+    country_from_timezone,
     get_country,
     localize_query,
     marketplace_site_queries,
@@ -68,6 +69,10 @@ def test_query_hints_and_headers() -> None:
     assert country_from_query("earbuds under 2000 INR") == "IN"
     assert country_from_headers({"CF-IPCountry": "IN"}) == "IN"
     assert country_from_headers({"Accept-Language": "en-GB,en;q=0.9"}) == "GB"
+    assert country_from_timezone("Asia/Dubai") == "AE"
+    assert country_from_timezone("Asia/Kolkata") == "IN"
+    assert country_from_timezone("America/New_York") == "US"
+    assert country_from_timezone("UTC") is None
 
 
 def test_localize_and_marketplace_queries() -> None:

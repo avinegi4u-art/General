@@ -11,7 +11,7 @@ from typing import Optional, Sequence
 from tabulate import tabulate
 
 from config import AppConfig, parse_weights
-from location import apply_country, country_from_query
+from location import apply_country, country_from_query, country_from_system
 from models import ProductItem, RankedPicks
 from scraper import PageScraper
 from scoring import rank_items
@@ -98,7 +98,7 @@ def apply_cli_overrides(config: AppConfig, args: argparse.Namespace) -> AppConfi
         config.weights = parse_weights(args.weights)
     if args.backend:
         config.search_backend = args.backend.lower()
-    country_code = args.country or country_from_query(args.query) or config.country_code
+    country_code = args.country or country_from_system() or country_from_query(args.query) or config.country_code
     set_currency = args.base_currency is None
     apply_country(config, country_code, set_currency=set_currency)
     if args.base_currency:

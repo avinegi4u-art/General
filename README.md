@@ -21,7 +21,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Open [http://127.0.0.1:5055](http://127.0.0.1:5055), choose **Deliver to** (your country is detected automatically), type a query such as `wireless earbuds under 200 AED`, and wait 15–30 seconds. FindBest searches local stores plus sellers that ship to you, then ranks the top 5.
+Open [http://127.0.0.1:5055](http://127.0.0.1:5055) and type a query. FindBest reads **this device’s time zone** (no location picker) and searches stores that sell or ship there.
 
 The app uses the `everywhere` search backend by default (DuckDuckGo’s multi-engine web search plus Google when available).
 
@@ -106,7 +106,7 @@ FindBest ranks listings you can actually buy:
 2. **Ships to your country** — overseas sellers that deliver there, such as AliExpress.
 3. **Other-country storefronts** (amazon.com when you are in the UAE, Flipkart when you are in the UAE, and so on) are hidden from the top picks when enough local or deliverable items exist.
 
-Pick **Deliver to** in the web app (auto-detected from your timezone / browser language). On the CLI, pass `--country AE` or `--country IN`. Currency follows the country unless you override it.
+The web app uses this device’s time zone (and IP/language if needed). There is no location dropdown. On the CLI, omit `--country` to use the system time zone, or pass `--country AE`. Currency follows the country unless you override it.
 
 ```bash
 python main.py --query "wireless earbuds" --country AE

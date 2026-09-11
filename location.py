@@ -469,6 +469,99 @@ def country_from_query(query: str) -> Optional[str]:
     return None
 
 
+# IANA time zone → shopper country (the system clock, no permission prompt).
+TZ_COUNTRY: dict[str, str] = {
+    "Asia/Dubai": "AE",
+    "Asia/Muscat": "OM",
+    "Asia/Riyadh": "SA",
+    "Asia/Qatar": "QA",
+    "Asia/Kuwait": "KW",
+    "Asia/Bahrain": "BH",
+    "Africa/Cairo": "EG",
+    "Asia/Kolkata": "IN",
+    "Asia/Calcutta": "IN",
+    "Asia/Karachi": "PK",
+    "America/New_York": "US",
+    "America/Chicago": "US",
+    "America/Denver": "US",
+    "America/Los_Angeles": "US",
+    "America/Phoenix": "US",
+    "America/Anchorage": "US",
+    "America/Detroit": "US",
+    "America/Boise": "US",
+    "America/Indiana/Indianapolis": "US",
+    "Pacific/Honolulu": "US",
+    "America/Toronto": "CA",
+    "America/Vancouver": "CA",
+    "America/Winnipeg": "CA",
+    "America/Edmonton": "CA",
+    "America/Halifax": "CA",
+    "America/Montreal": "CA",
+    "Europe/London": "GB",
+    "Europe/Belfast": "GB",
+    "Europe/Berlin": "DE",
+    "Australia/Sydney": "AU",
+    "Australia/Melbourne": "AU",
+    "Australia/Perth": "AU",
+    "Australia/Brisbane": "AU",
+    "Australia/Adelaide": "AU",
+}
+
+_CANADA_TZ_CITIES = frozenset(
+    {"Toronto", "Vancouver", "Winnipeg", "Edmonton", "Halifax", "Montreal", "Calgary"}
+)
+
+
+def country_from_timezone(name: str | None) -> Optional[str]:
+    """Map the device IANA time zone to a country we shop for."""
+    if not name:
+        return None
+    key = name.strip()
+    if not key or key.upper() in {"UTC", "GMT", "ETC/UTC"}:
+        return None
+    mapped = TZ_COUNTRY.get(key)
+    if mapped:
+        return mapped
+    if key.startswith("America/"):
+        city = key.rsplit("/", 1)[-1]
+        if city in _CANADA_TZ_CITIES:
+            return "CA"
+        if any(part in key for part in ("Mexico", "Argentina", "Sao_Paulo", "Lima", "Bogota", "Santiago")):
+            return None
+        return "US"
+    if key.startswith("Australia/"):
+        return "AU"
+    return None
+
+
+def country_from_locale(locale: str | None) -> Optional[str]:
+    """Map a BCP 47 locale such as ``en-IN`` to a country code."""
+    if not locale:
+        return None
+    match = re.search(r"^[a-z]{2}[-_]([a-z]{2})", locale.strip(), re.I)
+    if not match:
+        return None
+    region = match.group(1).upper()
+    if region in COUNTRY_PROFILES or region in {"UK", "UAE"}:
+        return get_country(region).code
+    return None
+
+
+def country_from_system() -> Optional[str]:
+    """Read the operating system's current time zone."""
+    try:
+        from datetime import datetime
+
+        tzinfo = datetime.now().astimezone().tzinfo
+        key = getattr(tzinfo, "key", None)
+        found = country_from_timezone(key)
+        if found:
+            return found
+    except Exception:  # noqa: BLE001
+        pass
+    return country_from_timezone(os.environ.get("TZ"))
+
+
 def country_from_headers(headers: dict[str, str] | None) -> Optional[str]:
     """Read a country code from common CDN / proxy geo headers."""
     if not headers:
@@ -512,19 +605,31 @@ def resolve_country(
     query: str = "",
     explicit: str | None = None,
     headers: dict[str, str] | None = None,
+    timezone: str | None = None,
+    locale: str | None = None,
 ) -> CountryProfile:
-    """Pick a country: explicit flag, then query hint, then config/env, then geo header."""
+    """Pick a country from the device first, then IP / language, then extras.
+
+    The shopper is not asked to choose a location. Time zone (system clock)
+    wins over query currency words so a search box never substitutes for geo.
+    """
     if explicit:
         return apply_country(config, explicit)
-    hinted = country_from_query(query)
-    if hinted:
-        return apply_country(config, hinted)
+    from_tz = country_from_timezone(timezone)
+    if from_tz:
+        return apply_country(config, from_tz)
     geo = country_from_headers(headers)
     if geo:
         return apply_country(config, geo)
+    from_locale = country_from_locale(locale)
+    if from_locale:
+        return apply_country(config, from_locale)
     env_code = os.getenv("PRODUCT_FINDER_COUNTRY", "").strip()
     if env_code:
         return apply_country(config, env_code)
+    hinted = country_from_query(query)
+    if hinted:
+        return apply_country(config, hinted)
     return apply_country(config, config.country_code or "AE")
 
 

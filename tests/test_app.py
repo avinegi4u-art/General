@@ -16,9 +16,9 @@ def test_index_renders_search_form() -> None:
     html = response.get_data(as_text=True)
     assert "FindBest" in html
     assert 'id="search-form"' in html
-    assert 'id="country"' in html
-    assert "Deliver to" in html
-    assert "wireless earbuds under 200 AED" in html
+    assert 'id="location-line"' in html
+    assert 'id="country"' not in html
+    assert "Deliver to" not in html
 
 
 def test_search_requires_query() -> None:
@@ -76,13 +76,24 @@ def test_search_returns_five_picks() -> None:
         client = app.test_client()
         response = client.post(
             "/api/search",
-            json={"query": "wireless earbuds under 200 AED", "country": "AE"},
+            json={"query": "wireless earbuds under 200 AED", "time_zone": "Asia/Dubai"},
         )
     assert response.status_code == 200
     payload = response.get_json()
     labels = [pick["label"] for pick in payload["picks"]]
     assert labels == ["Best match", "Best price", "Best value", "Best rated", "Also consider"]
     assert len(payload["picks"]) == 5
+
+
+def test_geo_uses_device_timezone() -> None:
+    from app import app
+
+    client = app.test_client()
+    response = client.get("/api/geo?tz=Asia/Kolkata")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["country"] == "IN"
+    assert payload["currency"] == "INR"
 
 
 def test_geo_endpoint_lists_countries() -> None:
