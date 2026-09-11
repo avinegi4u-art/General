@@ -19,6 +19,7 @@ from querying import (
     required_terms,
     tokenize,
 )
+from search import looks_like_category_url
 
 
 def relevance_score(query: str, item: ProductItem) -> float:
@@ -70,6 +71,9 @@ def relevance_score(query: str, item: ProductItem) -> float:
     if not category_matches(query, blob):
         # Washers, resistors, 10K gold, motorcycle thermometers, etc.
         score = min(score, 0.14) * 0.3
+    elif looks_like_category_url(item.url):
+        # A shop index is not a product to buy.
+        score *= 0.4
     return round(min(1.0, max(0.0, score)), 4)
 
 
@@ -228,6 +232,15 @@ def rank_items(
         if item.price_base is not None
         and item.scores.relevance >= config.min_relevance_for_price
     ]
+    budget = budget_in_base(query, config.base_currency)
+    if budget is not None:
+        in_budget = [item for item in priced_relevant if (item.price_base or 0) <= budget]
+        if in_budget:
+            priced_relevant = in_budget
+        elif priced_relevant:
+            notes.append(
+                f"No priced match was at or under {int(budget)} {config.base_currency}."
+            )
     if not priced_relevant:
         notes.append(
             "No priced items were a close enough match to the query; Best price is empty "

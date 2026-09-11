@@ -10,6 +10,7 @@ from querying import (
     precise_search_query,
     query_match_terms,
     required_terms,
+    shopping_followup_queries,
     tokenize,
 )
 from scoring import rank_items, relevance_score
@@ -136,6 +137,10 @@ def test_e_scooter_under_10k_is_not_a_10k_token_search() -> None:
     assert "-washer" in rewritten
     assert "-earrings" in rewritten
     assert "-thermometer" in rewritten
+    assert "-mobility" in rewritten
+
+    follows = shopping_followup_queries(query, "UAE")
+    assert any("xiaomi" in item for item in follows)
 
     assert hit_is_plausible(query, "Xiaomi Electric Scooter 6 Pro")
     assert hit_is_plausible(query, "CRONY M365 MAX Electric Scooter")
@@ -220,3 +225,27 @@ def test_rank_e_scooter_prefers_xiaomi_over_10k_lookalikes() -> None:
     assert picks.best_price is not None
     assert picks.best_price.url == crony.url
     assert any("Interpreted as" in note for note in picks.notes)
+
+
+def test_category_index_does_not_beat_named_scooter() -> None:
+    query = "best e scooter under 10k aed"
+    xiaomi = _item(
+        "Xiaomi Electric Scooter 6 Max",
+        "https://www.mi.com/ae-en/product/xiaomi-electric-scooter-6-max/",
+        "mi.com",
+        2556.0,
+        "Xiaomi electric scooter",
+    )
+    jumbo = _item(
+        "Electric Scooters at Best Prices in Dubai, UAE - Jumbo Electronics",
+        "https://www.jumbo.ae/toys/scooters.html",
+        "jumbo.ae",
+        1499.0,
+        "electric scooters",
+    )
+    assert relevance_score(query, xiaomi) > relevance_score(query, jumbo)
+    picks = rank_items([jumbo, xiaomi], query, AppConfig())
+    assert picks.best_overall is not None
+    assert "Xiaomi" in picks.best_overall.title
+    assert picks.best_price is not None
+    assert picks.best_price.url == xiaomi.url

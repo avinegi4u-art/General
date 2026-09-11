@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Iterable
@@ -25,20 +26,11 @@ def domain_from_url(url: str) -> str:
     return host
 
 
-def looks_like_product_url(url: str) -> bool:
-    """Heuristic used to prefer marketplace/product URLs over category/search pages."""
-    parsed = urlparse(url)
-    path = parsed.path.lower()
-    return any(hint in path for hint in PRODUCT_PATH_HINTS)
-
-
-def looks_like_category_url(url: str) -> bool:
-    """True for shop category/index pages that are not a single product listing."""
-    if looks_like_product_url(url):
-        return False
-    path = urlparse(url).path.lower().rstrip("/")
-    last = path.rsplit("/", 1)[-1]
-    if last in {
+_CATEGORY_LAST = frozenset(
+    {
+        "",
+        "s",  # Amazon search: /s or /Electric-Scooters/s
+        "b",
         "cycling",
         "scooters",
         "search",
@@ -51,11 +43,52 @@ def looks_like_category_url(url: str) -> bool:
         "shop",
         "store",
         "electric-scooters-hoverboards",
+        "electric-scooters",
+        "electricscooters",
+        "e-scooters",
+        "escooters",
         "sports-equipment",
+        "sporting-goods",
         "hoverboards",
-    }:
+    }
+)
+_CATEGORY_MARKERS = (
+    "/product-category/",
+    "/product-tag/",
+    "/collections/",
+    "/categories/",
+    "/category/",
+    "/classified",
+)
+
+
+def looks_like_category_url(url: str) -> bool:
+    """True for shop category, browse, and index pages — not a single listing."""
+    parsed = urlparse(url)
+    path = parsed.path.lower()
+    path_r = path.rstrip("/")
+    last = path_r.rsplit("/", 1)[-1] if path_r else ""
+    last = last.split(".")[0]
+    if not path_r:
+        return True
+    if "product-category" in path or "product-tag" in path:
+        return True
+    if any(marker in path for marker in _CATEGORY_MARKERS):
+        return True
+    if last in _CATEGORY_LAST:
+        return True
+    # Carrefour /c/ID, Sharaf DG /c/toys_hobbies/...
+    if re.search(r"/c/[\w-]+", path) and "/dp/" not in path:
         return True
     return False
+
+
+def looks_like_product_url(url: str) -> bool:
+    """Heuristic used to prefer marketplace/product URLs over category/search pages."""
+    if looks_like_category_url(url):
+        return False
+    path = urlparse(url).path.lower()
+    return any(hint in path for hint in PRODUCT_PATH_HINTS)
 
 
 def is_skippable_url(url: str) -> bool:
@@ -71,6 +104,8 @@ def is_skippable_url(url: str) -> bool:
         if host == skipped or host.endswith("." + skipped):
             return True
     if "/search/" in path or path.rstrip("/").endswith("/search"):
+        return True
+    if path.rstrip("/").endswith("/s") or path.rstrip("/") == "/s":
         return True
     if "/w/wholesale" in path or "/wholesale-" in path:
         return True
@@ -452,11 +487,12 @@ def _merge_hits(groups: Iterable[list[SearchResult]]) -> list[SearchResult]:
 def search_marketplace_sites(query: str, config: AppConfig) -> list[SearchResult]:
     """Fan out site-restricted searches so local stores are not missed."""
     from location import get_country, marketplace_site_queries
-    from querying import precise_search_query
+    from querying import precise_search_query, shopping_followup_queries
 
     country = get_country(config.country_code)
     focused = precise_search_query(query)
     queries = marketplace_site_queries(focused, country)
+    queries.extend(shopping_followup_queries(query, country.search_terms[0]))
     if not queries:
         return []
     ddg = DuckDuckGoBackend(region=config.search_region)
@@ -534,11 +570,11 @@ def search_web(query: str, config: AppConfig) -> list[SearchResult]:
     unique.sort(
         key=lambda hit: (
             not hit_is_plausible(query, hit.title, hit.snippet, hit.url),
+            not looks_like_product_url(hit.url),
             looks_like_category_url(hit.url),
             {"local": 0, "ships": 1, "unknown": 2, "foreign": 3}[
                 classify_listing(hit.url, hit.source_domain, country).kind
             ],
-            not looks_like_product_url(hit.url),
         )
     )
     buyable_n = sum(

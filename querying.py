@@ -173,6 +173,7 @@ SCOOTER_OFF_CATEGORY = frozenset(
         "washing",
         "10kg",
         "10kgs",
+        "mobility",
     }
 )
 
@@ -183,6 +184,7 @@ SCOOTER_SEARCH_NEGATIVES: tuple[str, ...] = (
     "earrings",
     "thermometer",
     "jewelry",
+    "mobility",
 )
 
 _PLUS_MODEL = re.compile(r"\b(\d+[a-z]?)\s*(?:\+|plus)\b", re.IGNORECASE)
@@ -455,6 +457,17 @@ def category_search_negatives(query: str) -> tuple[str, ...]:
     return ()
 
 
+def shopping_followup_queries(query: str, country_term: str) -> list[str]:
+    """Named-product searches so ranking sees listings, not category indexes."""
+    if not wants_electric_scooter(query):
+        return []
+    place = country_term.strip()
+    return [
+        f'xiaomi "electric scooter" {place}',
+        f'(segway OR ninebot OR kugoo OR crony) "electric scooter" {place}',
+    ]
+
+
 def precise_search_query(query: str) -> str:
     """Rewrite the web query like a shopping search, not a token dump.
 
@@ -511,7 +524,16 @@ def hit_is_plausible(query: str, title: str, snippet: str = "", url: str = "") -
         return False
     lowered = f"{title} {snippet}".lower()
     if not query_wants_parts(query) and any(
-        marker in lowered for marker in ("wiki", "guía", "guia completa", "buying guide")
+        marker in lowered
+        for marker in (
+            "wiki",
+            "guía",
+            "guia completa",
+            "buying guide",
+            "how to choose",
+            "pros and cons",
+            "need suggestion",
+        )
     ):
         return False
     return True

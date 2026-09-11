@@ -65,6 +65,7 @@ SKIP_DOMAINS: frozenset[str] = frozenset(
         "tiktok.com",
         "pinterest.com",
         "linkedin.com",
+        "reddit.com",
         "wikipedia.org",
         "glarity.app",
         "perplexity.ai",
