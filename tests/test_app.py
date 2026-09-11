@@ -16,10 +16,19 @@ def test_index_renders_search_form() -> None:
     html = response.get_data(as_text=True)
     assert "FindBest" in html
     assert 'id="search-form"' in html
-    assert 'id="location-line"' in html
-    assert 'id="overview"' in html
-    assert 'id="country"' not in html
+    assert ">Search<" in html
+    assert "Local stores" not in html
+    assert "this market" not in html
+    assert "id=\"location-line\"" not in html
+    assert "id=\"overview\"" not in html
+    assert "id=\"country\"" not in html
     assert "Deliver to" not in html
+    assert "placeholder=" not in html
+    assert "Open listing" not in html
+    assert "Other results" not in html
+    assert "Rankings mix" not in html
+    assert "Shopping in" not in html
+    assert "Using this device" not in html
 
 
 def test_search_requires_query() -> None:
