@@ -33,4 +33,8 @@ def test_product_url_heuristic() -> None:
     assert looks_like_category_url("https://www.carrefouruae.com/mafuae/en/c/NF1440200")
     assert looks_like_category_url("https://dubaiscooters.ae/")
     assert looks_like_category_url("https://www.jumbo.ae/toys/scooters.html")
+    assert looks_like_category_url(
+        "https://www.amazon.ae/gp/bestsellers/sports-goods/12285885031"
+    )
+    assert looks_like_category_url("https://www.whizz.ae/brand/navee/")
     assert not looks_like_category_url("https://www.amazon.ae/dp/B0ABCDEF")

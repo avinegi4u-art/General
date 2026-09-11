@@ -351,3 +351,47 @@ def test_amazon_ae_keeps_search_title_when_page_drops_gt3() -> None:
     fallback = rank_items([us_site, wellbots, amazon_no_model], query, config)
     assert fallback.best_overall is not None
     assert fallback.best_overall.source_domain == "amazon.ae"
+
+
+def test_polluted_snippet_does_not_make_unrelated_amazon_plausible() -> None:
+    query = "navee gt3 electric scooter buy"
+    polluted = "Buy NAVEE GT3 electric scooter online in the UAE"
+    assert not hit_is_plausible(
+        query,
+        "Ninebot Kickscooter D38E Powered By Segway",
+        snippet=polluted,
+        url="https://www.amazon.ae/Ninebot-Kickscooter-Electric-Capacity/dp/B09SB7KY2Z",
+    )
+    assert not hit_is_plausible(
+        query,
+        "Navee scooter GT3 GT3 pro GT3 Max fast controller 32km",
+        url="https://www.aliexpress.com/item/1005009469275859.html",
+    )
+    amazon = _item(
+        "NAVEE GT3 Pro Electric Scooter for Adults, 60KM Max",
+        "https://www.amazon.ae/NAVEE-Electric-Suspension-Commuting-Tubeless/dp/B0F1SYDQPP",
+        "amazon.ae",
+        1619.10,
+        "NAVEE GT3 Pro",
+    )
+    realmax = _item(
+        "REALMAX 8000w/72v Two Wheel Folding Off Road Electric Scooter",
+        "https://www.amazon.ae/REALMAX-8000w-Folding-Electric-Scooter/dp/B099BHKLP6",
+        "amazon.ae",
+        4999,
+        polluted,
+    )
+    controller = _item(
+        "Navee scooter GT3 GT3 pro GT3 Max fast controller 32km",
+        "https://www.aliexpress.com/item/1005009469275859.html",
+        "aliexpress.com",
+        80,
+        "fast controller for navee gt3",
+    )
+    config = AppConfig()
+    config.country_code = "AE"
+    picks = rank_items([realmax, controller, amazon], query, config)
+    assert picks.best_overall is not None
+    assert picks.best_overall.source_domain == "amazon.ae"
+    assert "REALMAX" not in picks.best_overall.title
+    assert "controller" not in picks.best_overall.title.lower()

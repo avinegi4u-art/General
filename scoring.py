@@ -70,9 +70,13 @@ def relevance_score(query: str, item: ProductItem, base_currency: str = "AED") -
     body_part = body_hits / len(query_terms)
     score = 0.70 * title_part + 0.30 * body_part + phrase_bonus + domain_bonus
 
-    blob = f"{item.title} {item.description} {item.url}"
+    blob = f"{item.title} {item.url}"
     hard_missing = missing_hard_required(query, blob)
-    soft_missing = [term for term in missing_required(query, blob) if is_modelish_term(term)]
+    soft_missing = [
+        term
+        for term in missing_required(query, f"{item.title} {item.description} {item.url}")
+        if is_modelish_term(term)
+    ]
     if hard_missing:
         # Brand missing from the listing: this is not the product they asked for.
         score = min(score, 0.18) * 0.4

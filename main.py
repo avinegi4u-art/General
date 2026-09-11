@@ -13,7 +13,7 @@ from tabulate import tabulate
 from config import AppConfig, parse_weights
 from location import apply_country, country_from_query, country_from_system
 from models import ProductItem, RankedPicks
-from querying import missing_required, prefer_query_aware_title
+from querying import missing_hard_required, missing_required, prefer_query_aware_title
 from scraper import PageScraper, items_from_hits
 from scoring import rank_items
 from search import search_web
@@ -231,10 +231,10 @@ def _merge_items(
         if existing is None or item.scrape_ok or (item.price and not existing.price):
             if query and existing is not None:
                 item.title = prefer_query_aware_title(query, item.title, existing.title)
-                if missing_required(query, f"{item.title} {item.description}"):
-                    extra_text = f"{existing.title}. {existing.description}".strip(". ")
-                    if extra_text:
-                        item.description = f"{extra_text}. {item.description}".strip()
+                if missing_required(query, item.title) and not missing_hard_required(
+                    query, existing.title
+                ):
+                    item.description = f"{existing.title}. {item.description}".strip()
             by_url[key] = item
     return list(by_url.values())
 

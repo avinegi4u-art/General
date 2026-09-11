@@ -142,6 +142,7 @@ ACCESSORY_TERMS = frozenset(
         "protector",
         "clamp",
         "charger",  # a scooter query should not surface a charger
+        "controller",
         "inner",
     }
 )
@@ -553,9 +554,12 @@ def hit_is_plausible(query: str, title: str, snippet: str = "", url: str = "") -
     URL slug is “NAVEE Electric Scooter” are not dropped before we can rank them.
     """
     slug = url.replace("-", " ").replace("/", " ").replace("_", " ")
-    blob = f"{title} {snippet} {slug}"
-    if missing_hard_required(query, blob):
+    # Site-restricted search snippets often echo the query onto unrelated listings.
+    # Require the brand in the title or URL, not only in the snippet.
+    title_url = f"{title} {slug}"
+    if missing_hard_required(query, title_url):
         return False
+    blob = f"{title} {snippet} {slug}"
     if accessory_multiplier(query, f"{title} {slug}") < 0.5:
         return False
     if not category_matches(query, blob):

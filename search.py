@@ -59,6 +59,9 @@ _CATEGORY_MARKERS = (
     "/categories/",
     "/category/",
     "/classified",
+    "/gp/bestsellers",
+    "/gp/best-sellers",
+    "/brand/",
 )
 
 
@@ -538,10 +541,13 @@ def search_web(query: str, config: AppConfig) -> list[SearchResult]:
         hit_is_plausible,
         missing_required,
         precise_search_query,
+        product_core_query,
+        required_terms,
     )
 
     country = get_country(config.country_code)
-    focused = precise_search_query(query)
+    # Brand searches: skip the long -mudguard list. DDG often returns nothing for it.
+    focused = product_core_query(query) if required_terms(query) else precise_search_query(query)
     localized = localize_query(focused, country)
     backend = build_search_backend(config)
     logger.info(
@@ -551,11 +557,11 @@ def search_web(query: str, config: AppConfig) -> list[SearchResult]:
         query,
         localized,
     )
+    hits: list[SearchResult] = []
     try:
         hits = backend.search(localized, max(config.max_results * 2, config.max_pages))
     except Exception:
         logger.exception("Search backend %s failed", backend.name)
-        raise
 
     extra: list[SearchResult] = []
     try:
@@ -579,7 +585,7 @@ def search_web(query: str, config: AppConfig) -> list[SearchResult]:
     unique.sort(
         key=lambda hit: (
             not hit_is_plausible(query, hit.title, hit.snippet, hit.url),
-            len(missing_required(query, f"{hit.title} {hit.snippet} {hit.url}")),
+            len(missing_required(query, f"{hit.title} {hit.url}")),
             not looks_like_product_url(hit.url),
             looks_like_category_url(hit.url),
             {"local": 0, "ships": 1, "unknown": 2, "foreign": 3}[

@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup, Tag
 
 from config import AppConfig, PLAUSIBLE_PRICE_RANGE, convert_to_base
 from models import PriceInfo, ProductItem, SearchResult
-from querying import hit_is_plausible, missing_required, prefer_query_aware_title
+from querying import hit_is_plausible, missing_hard_required, missing_required, prefer_query_aware_title
 from search import domain_from_url, looks_like_category_url, looks_like_product_url
 
 logger = logging.getLogger(__name__)
@@ -491,11 +491,9 @@ class PageScraper:
                 if query:
                     item.title = prefer_query_aware_title(query, item.title, hit.title)
                     if missing_required(query, f"{item.title} {item.description}") and (
-                        hit.title or hit.snippet
+                        not missing_hard_required(query, hit.title)
                     ):
-                        extra = f"{hit.title}. {hit.snippet}".strip(". ")
-                        if extra:
-                            item.description = f"{extra}. {item.description}".strip()
+                        item.description = f"{hit.title}. {item.description}".strip()
                 if not item.description:
                     item.description = hit.snippet
                 return item
@@ -526,10 +524,17 @@ class PageScraper:
         if len(product_hits) < 3:
             product_hits = list(hits)
         if query:
+            plausible = [
+                hit
+                for hit in product_hits
+                if hit_is_plausible(query, hit.title, hit.snippet, hit.url)
+            ]
+            if len(plausible) >= 3:
+                product_hits = plausible
             product_hits.sort(
                 key=lambda hit: (
                     not hit_is_plausible(query, hit.title, hit.snippet, hit.url),
-                    len(missing_required(query, f"{hit.title} {hit.snippet} {hit.url}")),
+                    len(missing_required(query, f"{hit.title} {hit.url}")),
                 )
             )
         limit = min(len(product_hits), self.config.max_pages)
