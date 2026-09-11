@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Iterable
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
 
@@ -25,10 +26,116 @@ def domain_from_url(url: str) -> str:
     return host
 
 
-def looks_like_product_url(url: str) -> bool:
-    """Heuristic used to prefer marketplace/product URLs over category/search pages."""
+_CATEGORY_LAST = frozenset(
+    {
+        "",
+        "s",  # Amazon search: /s or /Electric-Scooters/s
+        "b",
+        "cycling",
+        "scooters",
+        "search",
+        "classified",
+        "category",
+        "categories",
+        "collections",
+        "products",
+        "deals",
+        "shop",
+        "store",
+        "electric-scooters-hoverboards",
+        "electric-scooters",
+        "electricscooters",
+        "e-scooters",
+        "escooters",
+        "sports-equipment",
+        "sporting-goods",
+        "hoverboards",
+    }
+)
+_CATEGORY_MARKERS = (
+    "/product-category/",
+    "/product-tag/",
+    "/collections/",
+    "/categories/",
+    "/category/",
+    "/classified",
+    "/gp/bestsellers",
+    "/gp/best-sellers",
+    "/brand/",
+)
+
+
+_TRACKING_QUERY_PARAMS = frozenset(
+    {"srsltid", "gclid", "fbclid", "mc_cid", "mc_eid", "gclsrc", "dclid"}
+)
+
+
+def canonicalize_url(url: str) -> str:
+    """Drop tracking params and Shopify collection prefixes so listings are unique."""
+    parsed = urlparse(url)
+    path = re.sub(r"/collections/[^/]+(/products/)", r"\1", parsed.path, flags=re.I)
+    kept = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key.lower() not in _TRACKING_QUERY_PARAMS and not key.lower().startswith("utm_")
+    ]
+    query = urlencode(kept, doseq=True)
+    return urlunparse((parsed.scheme, parsed.netloc, path, parsed.params, query, ""))
+
+
+def looks_like_category_url(url: str) -> bool:
+    """True for shop category, browse, and index pages — not a single listing."""
     parsed = urlparse(url)
     path = parsed.path.lower()
+    path_r = path.rstrip("/")
+    last = path_r.rsplit("/", 1)[-1] if path_r else ""
+    last = last.split(".")[0]
+    # Shopify product URLs live under /collections/brand/products/slug.
+    if re.search(r"/products/[^/]+", path) or "/dp/" in path or "/gp/product" in path:
+        return False
+    if not path_r:
+        return True
+    if "product-category" in path or "product-tag" in path:
+        return True
+    if any(marker in path for marker in _CATEGORY_MARKERS):
+        return True
+    if last in _CATEGORY_LAST:
+        return True
+    # Carrefour /c/ID, Sharaf DG /c/toys_hobbies/...
+    if re.search(r"/c/[\w-]+", path) and "/dp/" not in path:
+        return True
+    return False
+
+
+def looks_like_brand_collection_url(url: str, query: str = "") -> bool:
+    """True for a shop catalog of the brand the shopper typed (/collections/vsett)."""
+    path = urlparse(url).path.lower().rstrip("/")
+    if re.search(r"/products/[^/]+", path):
+        return False
+    slug = ""
+    for prefix in ("/collections/", "/brand/"):
+        if prefix not in path:
+            continue
+        rest = path.split(prefix, 1)[1]
+        slug = rest.split("/")[0].replace("-", " ").strip()
+        break
+    if not slug or slug in {"all", "frontpage", "products", "scooters", "shop"}:
+        return False
+    if not query:
+        return True
+    from querying import required_terms
+
+    required = required_terms(query)
+    if not required:
+        return False
+    return any(term == slug or term in slug or slug in term for term in required)
+
+
+def looks_like_product_url(url: str) -> bool:
+    """Heuristic used to prefer marketplace/product URLs over category/search pages."""
+    if looks_like_category_url(url):
+        return False
+    path = urlparse(url).path.lower()
     return any(hint in path for hint in PRODUCT_PATH_HINTS)
 
 
@@ -45,6 +152,12 @@ def is_skippable_url(url: str) -> bool:
         if host == skipped or host.endswith("." + skipped):
             return True
     if "/search/" in path or path.rstrip("/").endswith("/search"):
+        return True
+    if path.rstrip("/").endswith("/s") or path.rstrip("/") == "/s":
+        return True
+    if "/w/wholesale" in path or "/wholesale-" in path:
+        return True
+    if "/wiki" in path or "/s/wiki" in path:
         return True
     return False
 
@@ -148,10 +261,19 @@ class GoogleCseBackend(SearchBackend):
 
     name = "google_cse"
 
-    def __init__(self, api_key: str, cse_id: str, timeout: float) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        cse_id: str,
+        timeout: float,
+        gl: str = "ae",
+        hl: str = "en",
+    ) -> None:
         self.api_key = api_key
         self.cse_id = cse_id
         self.timeout = timeout
+        self.gl = gl
+        self.hl = hl
 
     def search(self, query: str, max_results: int) -> list[SearchResult]:
         params = {
@@ -159,6 +281,8 @@ class GoogleCseBackend(SearchBackend):
             "cx": self.cse_id,
             "q": query,
             "num": min(max_results, 10),
+            "gl": self.gl,
+            "hl": self.hl,
         }
         response = requests.get(
             "https://www.googleapis.com/customsearch/v1",
@@ -188,10 +312,21 @@ class SerpApiBackend(SearchBackend):
 
     name = "serpapi"
 
-    def __init__(self, api_key: str, timeout: float, endpoint: str) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        timeout: float,
+        endpoint: str,
+        gl: str = "ae",
+        hl: str = "en",
+        location: str = "United Arab Emirates",
+    ) -> None:
         self.api_key = api_key
         self.timeout = timeout
         self.endpoint = endpoint
+        self.gl = gl
+        self.hl = hl
+        self.location = location
 
     def search(self, query: str, max_results: int) -> list[SearchResult]:
         params = {
@@ -199,6 +334,9 @@ class SerpApiBackend(SearchBackend):
             "q": query,
             "api_key": self.api_key,
             "num": min(max_results, 20),
+            "gl": self.gl,
+            "hl": self.hl,
+            "location": self.location,
         }
         response = requests.get(self.endpoint, params=params, timeout=self.timeout)
         response.raise_for_status()
@@ -231,20 +369,42 @@ class EverywhereBackend(SearchBackend):
 
     name = "everywhere"
 
-    def __init__(self, region: str, timeout: float, serpapi_url: str) -> None:
+    def __init__(
+        self,
+        region: str,
+        timeout: float,
+        serpapi_url: str,
+        gl: str = "ae",
+        hl: str = "en",
+        location: str = "United Arab Emirates",
+    ) -> None:
         self.region = region
         self.timeout = timeout
         self.serpapi_url = serpapi_url
+        self.gl = gl
+        self.hl = hl
+        self.location = location
 
     def _backends(self) -> list[SearchBackend]:
         backends: list[SearchBackend] = [DuckDuckGoBackend(self.region)]
         serp_key = os.getenv("SERPAPI_KEY", "").strip()
         if serp_key:
-            backends.append(SerpApiBackend(serp_key, self.timeout, self.serpapi_url))
+            backends.append(
+                SerpApiBackend(
+                    serp_key,
+                    self.timeout,
+                    self.serpapi_url,
+                    gl=self.gl,
+                    hl=self.hl,
+                    location=self.location,
+                )
+            )
         google_key = os.getenv("GOOGLE_API_KEY", "").strip()
         cse_id = os.getenv("GOOGLE_CSE_ID", "").strip()
         if google_key and cse_id:
-            backends.append(GoogleCseBackend(google_key, cse_id, self.timeout))
+            backends.append(
+                GoogleCseBackend(google_key, cse_id, self.timeout, gl=self.gl, hl=self.hl)
+            )
         return backends
 
     def search(self, query: str, max_results: int) -> list[SearchResult]:
@@ -314,12 +474,22 @@ def build_search_backend(config: AppConfig) -> SearchBackend:
             region=config.search_region,
             timeout=config.request_timeout,
             serpapi_url=config.serpapi_url,
+            gl=config.google_gl,
+            hl=config.google_hl,
+            location=config.google_location,
         )
     if name in {"serpapi", "serp"}:
         api_key = os.getenv("SERPAPI_KEY", "").strip()
         if not api_key:
             raise RuntimeError("SEARCH_BACKEND=serpapi requires SERPAPI_KEY.")
-        return SerpApiBackend(api_key, config.request_timeout, config.serpapi_url)
+        return SerpApiBackend(
+            api_key,
+            config.request_timeout,
+            config.serpapi_url,
+            gl=config.google_gl,
+            hl=config.google_hl,
+            location=config.google_location,
+        )
     if name in {"google_cse", "cse"}:
         api_key = os.getenv("GOOGLE_API_KEY", "").strip()
         cse_id = os.getenv("GOOGLE_CSE_ID", "").strip()
@@ -327,13 +497,17 @@ def build_search_backend(config: AppConfig) -> SearchBackend:
             raise RuntimeError(
                 "SEARCH_BACKEND=google_cse requires GOOGLE_API_KEY and GOOGLE_CSE_ID."
             )
-        return GoogleCseBackend(api_key, cse_id, config.request_timeout)
+        return GoogleCseBackend(
+            api_key, cse_id, config.request_timeout, gl=config.google_gl, hl=config.google_hl
+        )
     if name in {"google", "googlesearch"}:
         api_key = os.getenv("GOOGLE_API_KEY", "").strip()
         cse_id = os.getenv("GOOGLE_CSE_ID", "").strip()
         if api_key and cse_id:
             logger.info("GOOGLE_API_KEY detected; using Programmable Search JSON API.")
-            return GoogleCseBackend(api_key, cse_id, config.request_timeout)
+            return GoogleCseBackend(
+                api_key, cse_id, config.request_timeout, gl=config.google_gl, hl=config.google_hl
+            )
         logger.warning(
             "Using googlesearch-python. Prefer SERPAPI_KEY or GOOGLE_CSE_ID for a "
             "ToS-friendly Google search."
@@ -345,24 +519,191 @@ def build_search_backend(config: AppConfig) -> SearchBackend:
     )
 
 
-def search_web(query: str, config: AppConfig) -> list[SearchResult]:
-    """Run a search and return unique, scrape-eligible results."""
-    backend = build_search_backend(config)
-    logger.info("Searching with backend=%s query=%r", backend.name, query)
-    try:
-        hits = backend.search(query, max(config.max_results * 2, config.max_pages))
-    except Exception:
-        logger.exception("Search backend %s failed", backend.name)
-        raise
-
+def _merge_hits(groups: Iterable[list[SearchResult]]) -> list[SearchResult]:
     seen: set[str] = set()
     unique: list[SearchResult] = []
-    for hit in hits:
-        key = hit.url.split("#", 1)[0].rstrip("/")
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(hit)
-    unique.sort(key=lambda hit: (not looks_like_product_url(hit.url), hit.url))
-    logger.info("Search returned %d unique result(s)", len(unique))
-    return unique[: config.max_results]
+    for group in groups:
+        for hit in group:
+            hit.url = canonicalize_url(hit.url)
+            key = hit.url.split("#", 1)[0].rstrip("/")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            unique.append(hit)
+    return unique
+
+
+def search_marketplace_sites(query: str, config: AppConfig) -> list[SearchResult]:
+    """Fan out site-restricted searches so local stores are not missed."""
+    from location import get_country, marketplace_site_queries
+    from querying import (
+        product_core_query,
+        required_terms,
+        shopping_followup_queries,
+        wants_electric_scooter,
+    )
+
+    country = get_country(config.country_code)
+    # Negatives like -kit hide amazon.ae product pages. Site searches use brand+model only.
+    core = product_core_query(query)
+    queries = marketplace_site_queries(core, country)
+    req = required_terms(query)
+    if req and country.local_domains:
+        queries.insert(0, f'"{" ".join(req)}" site:{country.local_domains[0]}')
+    if wants_electric_scooter(query) or req:
+        for domain in country.specialty_domains:
+            site_q = f"{core} site:{domain}"
+            if site_q not in queries:
+                queries.append(site_q)
+    queries.extend(shopping_followup_queries(query, country.search_terms[0]))
+    if not queries:
+        return []
+    ddg = DuckDuckGoBackend(region=config.search_region)
+    per_query = 5
+
+    def run_one(site_query: str) -> list[SearchResult]:
+        try:
+            logger.info("marketplace search: %r", site_query)
+            return ddg.search(site_query, per_query)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("marketplace search failed for %r: %s", site_query, exc)
+            return []
+
+    extra: list[SearchResult] = []
+    primary: list[str] = []
+    rest = list(queries)
+    if req and country.local_domains:
+        first = f'"{" ".join(req)}" site:{country.local_domains[0]}'
+        rest = [row for row in queries if row != first]
+        primary.append(first)
+
+    for site_query in primary:
+        rows = run_one(site_query)
+        extra.extend(rows)
+        has_product = any(looks_like_product_url(hit.url) for hit in rows)
+        if not has_product:
+            extra.extend(run_one(site_query))
+
+    if rest:
+        with ThreadPoolExecutor(max_workers=min(4, len(rest))) as pool:
+            futures = [pool.submit(run_one, site_query) for site_query in rest]
+            try:
+                for future in as_completed(futures, timeout=max(config.request_timeout + 6.0, 18.0)):
+                    try:
+                        extra.extend(future.result())
+                    except Exception as worker_err:  # noqa: BLE001
+                        logger.warning("marketplace worker failed: %s", worker_err)
+            except TimeoutError:
+                logger.warning("marketplace searches timed out")
+    return extra
+
+
+def seeded_specialty_catalogs(query: str, config: AppConfig) -> list[SearchResult]:
+    """Direct brand catalogs on known local shops, so DDG does not have to find them."""
+    from location import get_country
+    from querying import required_terms
+
+    country = get_country(config.country_code)
+    req = required_terms(query)
+    if not req:
+        return []
+    brand = req[0]
+    if not re.fullmatch(r"[a-z][a-z0-9]+", brand):
+        return []
+    hits: list[SearchResult] = []
+    for domain in country.specialty_domains:
+        hits.append(
+            SearchResult(
+                title=f"{brand} electric scooters",
+                url=f"https://www.{domain}/collections/{brand}",
+                snippet=f"Shop {brand} in {country.name}",
+                source_domain=domain,
+            )
+        )
+    return hits
+
+
+def search_web(query: str, config: AppConfig) -> list[SearchResult]:
+    """Run a search and return unique, scrape-eligible results.
+
+    The open-web query is localized to the shopper's country. Additional
+    site-restricted searches pull in local stores and sellers that ship there
+    (for example AliExpress) so those listings are not crowded out by
+    another country's storefronts.
+    """
+    from location import classify_listing, get_country, localize_query
+    from querying import (
+        expand_shopper_query,
+        hit_is_plausible,
+        missing_required,
+        precise_search_query,
+        product_core_query,
+        required_terms,
+    )
+
+    country = get_country(config.country_code)
+    # Brand searches: skip the long -mudguard list. DDG often returns nothing for it.
+    focused = product_core_query(query) if required_terms(query) else precise_search_query(query)
+    localized = localize_query(focused, country)
+    backend = build_search_backend(config)
+    logger.info(
+        "Searching with backend=%s country=%s query=%r localized=%r",
+        backend.name,
+        country.code,
+        query,
+        localized,
+    )
+    hits: list[SearchResult] = []
+    try:
+        hits = backend.search(localized, max(config.max_results * 2, config.max_pages))
+    except Exception:
+        logger.exception("Search backend %s failed", backend.name)
+
+    extra: list[SearchResult] = []
+    try:
+        extra = search_marketplace_sites(query, config)
+    except Exception as exc:  # noqa: BLE001 — extras must not fail the whole search
+        logger.warning("marketplace searches failed: %s", exc)
+
+    unique = _merge_hits([hits, extra, seeded_specialty_catalogs(query, config)])
+    if len(unique) < 8:
+        try:
+            expanded = expand_shopper_query(query)
+            logger.info("Few hits; retrying with the expanded query %r", expanded)
+            retry = backend.search(
+                localize_query(expanded, country),
+                max(config.max_results, 8),
+            )
+            unique = _merge_hits([unique, retry])
+        except Exception as retry_exc:  # noqa: BLE001
+            logger.warning("fallback search failed: %s", retry_exc)
+
+    unique.sort(
+        key=lambda hit: (
+            not hit_is_plausible(query, hit.title, hit.snippet, hit.url),
+            len(missing_required(query, f"{hit.title} {hit.url}")),
+            not looks_like_product_url(hit.url)
+            and not looks_like_brand_collection_url(hit.url, query),
+            looks_like_category_url(hit.url)
+            and not looks_like_brand_collection_url(hit.url, query),
+            {"local": 0, "ships": 1, "unknown": 2, "foreign": 3}[
+                classify_listing(hit.url, hit.source_domain, country).kind
+            ],
+        )
+    )
+    buyable_n = sum(
+        1
+        for hit in unique
+        if classify_listing(hit.url, hit.source_domain, country).kind in {"local", "ships"}
+    )
+    logger.info(
+        "Search returned %d unique result(s) (%d local/ships) for %s",
+        len(unique),
+        buyable_n,
+        country.code,
+    )
+    capped = unique[: config.max_results]
+    for hit in unique[config.max_results :]:
+        if looks_like_brand_collection_url(hit.url, query):
+            capped.append(hit)
+    return capped

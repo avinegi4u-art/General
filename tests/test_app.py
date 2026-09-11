@@ -16,7 +16,19 @@ def test_index_renders_search_form() -> None:
     html = response.get_data(as_text=True)
     assert "FindBest" in html
     assert 'id="search-form"' in html
-    assert "wireless earbuds under 200 AED" in html
+    assert ">Search<" in html
+    assert "Local stores" not in html
+    assert "this market" not in html
+    assert "id=\"location-line\"" not in html
+    assert "id=\"overview\"" not in html
+    assert "id=\"country\"" not in html
+    assert "Deliver to" not in html
+    assert "placeholder=" not in html
+    assert "Open listing" not in html
+    assert "Other results" not in html
+    assert "Rankings mix" not in html
+    assert "Shopping in" not in html
+    assert "Using this device" not in html
 
 
 def test_search_requires_query() -> None:
@@ -72,12 +84,39 @@ def test_search_returns_five_picks() -> None:
     )
     with patch("app.run_pipeline", return_value=picks):
         client = app.test_client()
-        response = client.post("/api/search", json={"query": "wireless earbuds under 200 AED"})
+        response = client.post(
+            "/api/search",
+            json={"query": "wireless earbuds under 200 AED", "time_zone": "Asia/Dubai"},
+        )
     assert response.status_code == 200
     payload = response.get_json()
     labels = [pick["label"] for pick in payload["picks"]]
     assert labels == ["Best match", "Best price", "Best value", "Best rated", "Also consider"]
     assert len(payload["picks"]) == 5
+
+
+def test_geo_uses_device_timezone() -> None:
+    from app import app
+
+    client = app.test_client()
+    response = client.get("/api/geo?tz=Asia/Kolkata")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["country"] == "IN"
+    assert payload["currency"] == "INR"
+
+
+def test_geo_endpoint_lists_countries() -> None:
+    from app import app
+
+    client = app.test_client()
+    response = client.get("/api/geo", headers={"Accept-Language": "en-IN"})
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["country"] == "IN"
+    codes = [row["code"] for row in payload["countries"]]
+    assert "AE" in codes
+    assert "IN" in codes
 
 
 def test_everywhere_backend_is_selectable() -> None:

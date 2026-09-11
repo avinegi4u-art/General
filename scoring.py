@@ -3,108 +3,44 @@
 from __future__ import annotations
 
 import math
-import re
 from statistics import median
 from typing import Optional
 
-from config import AppConfig, ScoreWeights, convert_to_base
+from config import AppConfig, ScoreWeights
+from intent import (
+    build_overview,
+    popular_model_bonus,
+    price_outside_band,
+    spec_collides_with_budget,
+)
+from location import classify_listing, get_country, is_buyable
 from models import LabeledPick, ProductItem, RankedPicks, ScoreBreakdown
-
-STOPWORDS = frozenset(
-    {
-        "a",
-        "an",
-        "and",
-        "for",
-        "in",
-        "of",
-        "on",
-        "or",
-        "the",
-        "to",
-        "with",
-        "under",
-        "below",
-        "less",
-        "than",
-        "best",
-        "buy",
-        "cheap",
-        "price",
-        "review",
-        "reviews",
-    }
+from querying import (
+    accessory_multiplier,
+    budget_in_base,
+    category_matches,
+    expand_shopper_query,
+    is_modelish_term,
+    missing_hard_required,
+    missing_required,
+    query_match_terms,
+    required_terms,
+    tokenize,
 )
-
-BUDGET_PATTERN = re.compile(
-    r"(?:under|below|less\s+than|upto|up\s+to|<)\s*"
-    r"(?P<currency>AED|USD|EUR|GBP|INR|SAR|QAR|Dhs|DH|Rs\.?|\$|€|£|₹)?\s*"
-    r"(?P<amount>\d[\d,]*(?:\.\d+)?)"
-    r"(?:\s*(?P<currency2>AED|USD|EUR|GBP|INR|SAR|QAR|Dhs|DH|Rs\.?))?",
-    re.IGNORECASE,
-)
+from search import looks_like_category_url
 
 
-def tokenize(text: str) -> list[str]:
-    """Lowercase alphanumeric tokens, minus a small stopword list."""
-    words = re.findall(r"[a-z0-9]+", text.lower())
-    return [word for word in words if word not in STOPWORDS and len(word) > 1]
+def relevance_score(query: str, item: ProductItem, base_currency: str = "AED") -> float:
+    """0–1 score based on query-term overlap, with brand/model required.
 
-
-def extract_budget(query: str) -> Optional[float]:
-    """Return a numeric budget mentioned in the query, if any.
-
-    Currency conversion of the budget itself is left to the caller; this returns
-    the raw amount as written (e.g. 200 from “under 200 AED”).
+    Title matches weigh more than body matches. Spare parts (“compatible with
+    VSETT 10+”, mudguards, kits) score near zero unless the query asks for a part.
+    Brand and model tokens such as ``vsett`` and ``10+`` must appear or the score
+    is capped so they cannot win Best price.
     """
-    match = BUDGET_PATTERN.search(query)
-    if not match:
-        return None
-    raw = match.group("amount").replace(",", "")
-    try:
-        value = float(raw)
-    except ValueError:
-        return None
-    return value if value > 0 else None
-
-
-def extract_budget_currency(query: str, default: str) -> str:
-    match = BUDGET_PATTERN.search(query)
-    if not match:
-        return default
-    token = match.group("currency") or match.group("currency2")
-    if not token:
-        return default
-    aliases = {
-        "DHS": "AED",
-        "DH": "AED",
-        "$": "USD",
-        "€": "EUR",
-        "£": "GBP",
-        "₹": "INR",
-        "RS": "INR",
-        "RS.": "INR",
-    }
-    key = token.strip().upper()
-    return aliases.get(key, key)
-
-
-def budget_in_base(query: str, base_currency: str) -> Optional[float]:
-    """Parse a query budget and convert it into ``base_currency`` using fixed FX rates."""
-    amount = extract_budget(query)
-    if amount is None:
-        return None
-    currency = extract_budget_currency(query, base_currency)
-    return convert_to_base(amount, currency, base_currency)
-
-
-def relevance_score(query: str, item: ProductItem) -> float:
-    """0–1 score based on query-term overlap in title, domain, description, and features.
-
-    Title matches weigh more than body matches. An exact phrase hit in the title
-    is rewarded so that loosely related pages do not outrank true product pages.
-    """
-    query_terms = tokenize(query)
+    query_terms = query_match_terms(query)
+    if not query_terms:
+        query_terms = tokenize(query)
     if not query_terms:
         return 0.0
 
@@ -123,12 +59,52 @@ def relevance_score(query: str, item: ProductItem) -> float:
     body_hits = sum(1 for term in query_terms if term in body_tokens)
     phrase = " ".join(query_terms)
     phrase_bonus = 0.15 if phrase and phrase in title else 0.0
+    req = required_terms(query)
+    if len(req) >= 2 and " ".join(req[:2]) in title:
+        phrase_bonus = max(phrase_bonus, 0.2)
+    elif req and req[0] in title and any(term.endswith("+") and term in title_tokens for term in req):
+        phrase_bonus = max(phrase_bonus, 0.18)
     domain_bonus = 0.05 if any(term in item.source_domain.lower() for term in query_terms) else 0.0
 
     title_part = title_hits / len(query_terms)
     body_part = body_hits / len(query_terms)
     score = 0.70 * title_part + 0.30 * body_part + phrase_bonus + domain_bonus
-    return round(min(1.0, score), 4)
+
+    blob = f"{item.title} {item.url}"
+    hard_missing = missing_hard_required(query, blob)
+    soft_missing = [
+        term
+        for term in missing_required(query, f"{item.title} {item.description} {item.url}")
+        if is_modelish_term(term)
+    ]
+    if hard_missing:
+        # Brand missing from the listing: this is not the product they asked for.
+        score = min(score, 0.18) * 0.4
+    elif soft_missing:
+        # Amazon.ae often titles “NAVEE Electric Scooter” without “GT3” in the slug.
+        score = min(score, 0.48)
+
+    score *= accessory_multiplier(query, item.title)
+    blob = f"{item.title} {item.description}"
+    if not category_matches(query, blob):
+        # Washers, resistors, 10K gold, motorcycle thermometers, etc.
+        score = min(score, 0.14) * 0.3
+    elif spec_collides_with_budget(query, blob):
+        # “10000W scooter” is not a 10000 AED budget match.
+        score = min(score, 0.16) * 0.35
+    elif looks_like_category_url(item.url):
+        # A shop index is not a product to buy.
+        score *= 0.4
+    else:
+        score = min(1.0, score + popular_model_bonus(query, item.title))
+    if (
+        item.price_base
+        and item.price_base > 0
+        and price_outside_band(query, item.price_base, base_currency)
+    ):
+        # Category crumbs (AED 25 “electric scooters”) cannot win Best price.
+        score = min(score, 0.22)
+    return round(min(1.0, max(0.0, score)), 4)
 
 
 def _log_price_score(amount: float, lo: float, hi: float) -> float:
@@ -150,6 +126,7 @@ def apply_scores(
     """Fill ``item.scores`` for every product using the current catalogue as context."""
     weights = (weights or config.weights).normalized()
     budget = budget_in_base(query, config.base_currency)
+    country = get_country(config.country_code)
 
     known_prices = [item.price_base for item in items if item.price_base and item.price_base > 0]
     if known_prices:
@@ -164,7 +141,12 @@ def apply_scores(
         lo = hi = mid = 1.0
 
     for item in items:
-        rel = relevance_score(query, item)
+        listing = classify_listing(item.url, item.source_domain, country)
+        item.availability = listing.kind
+        item.availability_label = listing.label
+        avail_s = listing.score
+
+        rel = relevance_score(query, item, config.base_currency)
 
         if item.price_base and item.price_base > 0:
             price_s = _log_price_score(max(item.price_base, 0.01), max(lo, 0.01), hi)
@@ -187,20 +169,24 @@ def apply_scores(
             weights.relevance * rel
             + weights.price * price_s
             + weights.rating * rating_s
+            + weights.availability * avail_s
         )
 
         # Best value: quality per unit of (log) price. Unknown prices get a low value score.
+        # Local / ships-here listings keep more of their value score than foreign storefronts.
         quality = 0.55 * rel + 0.45 * rating_s
         if item.price_base and item.price_base > 0:
             unit = 1.0 + math.log1p(item.price_base / max(mid, 1.0))
             value = quality / unit
         else:
             value = quality * 0.25
+        value *= 0.55 + 0.45 * avail_s
 
         item.scores = ScoreBreakdown(
             relevance=round(rel, 4),
             price=round(price_s, 4),
             rating=round(rating_s, 4),
+            availability=round(avail_s, 4),
             overall=round(overall, 4),
             value=round(value, 4),
         )
@@ -222,36 +208,102 @@ def rank_items(
     weights = (weights or config.weights).normalized()
     scored = apply_scores(items, query, config, weights)
     notes: list[str] = []
+    country = get_country(config.country_code)
+
+    # Match the product first; only then prefer local / ships-to-you storefronts.
+    on_query = [
+        item for item in scored if item.scores.relevance >= config.min_relevance_for_value
+    ]
+    off_query = len(scored) - len(on_query)
+    if on_query:
+        if off_query:
+            notes.append(
+                f"Hid {off_query} listing(s) that were spare parts or did not match "
+                "the product name you typed."
+            )
+        pool = on_query
+    else:
+        notes.append(
+            "No listing closely matched the product you asked for; spare parts and "
+            "lookalikes were skipped."
+        )
+        pool = []
+
+    preferred = [item for item in pool if is_buyable(item.availability)]
+    unknown = [item for item in pool if item.availability == "unknown"]
+    if preferred:
+        foreign_dropped = len(pool) - len(preferred)
+        in_band = [
+            item
+            for item in preferred
+            if not item.price_base
+            or not price_outside_band(query, item.price_base, config.base_currency)
+        ]
+        if in_band and len(in_band) < len(preferred):
+            notes.append(
+                "Hid listings whose prices were far outside a buyable range for this product."
+            )
+            preferred = in_band
+        catalogue = preferred
+        if foreign_dropped:
+            notes.append(
+                f"Hid {foreign_dropped} listing(s) from other countries that may not ship to "
+                f"{country.name}. Showing stores in {country.name} and sellers that "
+                f"deliver there (for example AliExpress)."
+            )
+    elif unknown:
+        catalogue = unknown
+        foreign_n = sum(1 for item in pool if item.availability == "foreign")
+        if foreign_n:
+            notes.append(
+                f"Few local or deliverable listings were found for {country.name}; "
+                "other-country storefronts were still excluded from the top picks."
+            )
+    else:
+        catalogue = []
+        if pool:
+            notes.append(
+                f"Found listings only from other countries that may not ship to "
+                f"{country.name}; they were left out of the top picks."
+            )
 
     priced_relevant = [
         item
-        for item in scored
+        for item in catalogue
         if item.price_base is not None
         and item.scores.relevance >= config.min_relevance_for_price
     ]
+    budget = budget_in_base(query, config.base_currency)
+    if budget is not None:
+        in_budget = [item for item in priced_relevant if (item.price_base or 0) <= budget]
+        if in_budget:
+            priced_relevant = in_budget
+        elif priced_relevant:
+            notes.append(
+                f"No priced match was at or under {int(budget)} {config.base_currency}."
+            )
     if not priced_relevant:
         notes.append(
-            "No priced items met the relevance threshold; Best price uses the lowest "
-            "known price among all results."
+            "No priced items were a close enough match to the query; Best price is empty "
+            "rather than falling back to a cheap unrelated listing."
         )
-        priced_relevant = [item for item in scored if item.price_base is not None]
 
     value_pool = [
         item
-        for item in scored
+        for item in catalogue
         if item.price_base is not None
         and item.scores.relevance >= config.min_relevance_for_value
     ]
     if not value_pool:
-        value_pool = [item for item in scored if item.price_base is not None]
+        notes.append("No priced items available for Best value.")
 
     rated_pool = [
         item
-        for item in scored
+        for item in catalogue
         if item.scores.relevance >= config.min_relevance_for_value
-    ] or scored
+    ]
 
-    overall_sorted = sorted(scored, key=lambda i: i.scores.overall, reverse=True)
+    overall_sorted = sorted(catalogue, key=lambda i: i.scores.overall, reverse=True)
     price_sorted = sorted(priced_relevant, key=lambda i: (i.price_base or math.inf, -i.scores.overall))
     value_sorted = sorted(value_pool, key=lambda i: i.scores.value, reverse=True)
     rated_sorted = sorted(
@@ -275,6 +327,13 @@ def rank_items(
         notes.append("No priced items available for Best value.")
     if not scored:
         notes.append("No search results were scraped.")
+    notes.insert(
+        0,
+        f"Ranked for {country.name}: local stores first, then sellers that ship there.",
+    )
+    interpreted = expand_shopper_query(query)
+    if interpreted.lower() != " ".join(query.lower().split()):
+        notes.insert(0, f"Interpreted as {interpreted}.")
 
     answers = _build_answers(
         limit=config.top_answers,
@@ -284,10 +343,13 @@ def rank_items(
         rated_sorted=rated_sorted,
     )
     also_consider = next((pick.item for pick in answers if pick.key.startswith("also")), None)
+    overview = build_overview(query, country.name, config.base_currency, answers)
 
     return RankedPicks(
         query=query,
         base_currency=config.base_currency,
+        country_code=country.code,
+        country_name=country.name,
         items=overall_sorted,
         best_price=best_price,
         best_overall=best_overall,
@@ -295,10 +357,12 @@ def rank_items(
         best_rated=best_rated,
         also_consider=also_consider,
         answers=answers,
+        overview=overview,
         weights={
             "relevance": weights.relevance,
             "price": weights.price,
             "rating": weights.rating,
+            "availability": weights.availability,
         },
         notes=notes,
     )

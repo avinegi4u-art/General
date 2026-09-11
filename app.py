@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 from typing import Any
 
 from flask import Flask, jsonify, render_template, request
 
 from config import AppConfig
+from location import apply_country, list_countries, resolve_country
 from main import configure_logging, run as run_pipeline
 
 logger = logging.getLogger(__name__)
@@ -17,42 +17,24 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 ALLOWED_CURRENCIES = frozenset(
-    {"AED", "USD", "EUR", "GBP", "INR", "SAR", "QAR", "AUD", "CAD"}
-)
-EXAMPLE_QUERIES = (
-    "wireless earbuds under 200 AED",
-    "noise cancelling headphones",
-    "office chair under 500 AED",
-    "mechanical keyboard under $80",
+    {"AED", "USD", "EUR", "GBP", "INR", "SAR", "QAR", "AUD", "CAD", "KWD", "BHD", "OMR", "EGP", "PKR"}
 )
 
 
-def infer_region(query: str, fallback: str) -> str:
-    """Pick a DuckDuckGo region from currency/place hints in the query."""
-    text = query.lower()
-    if re.search(r"\b(aed|dhs|dubai|uae|emirates)\b", text):
-        return "ae-en"
-    if re.search(r"\b(inr|rupees?|india)\b", text):
-        return "in-en"
-    if re.search(r"\b(gbp|£|uk|britain)\b", text):
-        return "uk-en"
-    if re.search(r"\b(eur|€|europe)\b", text):
-        return "de-en"
-    if re.search(r"\b(usd|\$|usa|united states)\b", text):
-        return "us-en"
-    return fallback
-
-
-def web_config(query: str, base_currency: str, max_pages: int) -> AppConfig:
+def web_config(
+    base_currency: str,
+    max_pages: int,
+    country_code: str,
+) -> AppConfig:
     """Config tuned for the interactive app: broader search, slightly faster scrape."""
     config = AppConfig.from_env()
     config.search_backend = os.getenv("SEARCH_BACKEND", "everywhere")
     config.base_currency = base_currency
     config.max_pages = max_pages
-    config.max_results = max(max_pages + 4, 12)
+    config.max_results = max(max_pages + 8, 16)
     config.min_delay_s = min(config.min_delay_s, 0.25)
     config.max_delay_s = min(config.max_delay_s, 0.7)
-    config.search_region = infer_region(query, config.search_region)
+    apply_country(config, country_code)
     config.max_retries = 1
     return config
 
@@ -72,21 +54,70 @@ def _card_payload(picks_dict: dict[str, Any]) -> dict[str, Any]:
     return {
         "query": picks_dict.get("query"),
         "base_currency": picks_dict.get("base_currency"),
+        "country_code": picks_dict.get("country_code"),
+        "country_name": picks_dict.get("country_name"),
         "items_considered": picks_dict.get("items_considered", 0),
         "notes": picks_dict.get("notes") or [],
+        "overview": picks_dict.get("overview") or "",
         "picks": answers,
         "items": picks_dict.get("items") or [],
     }
 
 
+def _header_map() -> dict[str, str]:
+    return {str(key): str(value) for key, value in request.headers.items()}
+
+
+def _request_location() -> Any:
+    """Resolve country from the device time zone, then IP / language."""
+    payload = request.get_json(silent=True) or {}
+    timezone = str(
+        payload.get("time_zone")
+        or request.args.get("tz")
+        or request.headers.get("X-Timezone")
+        or ""
+    ).strip() or None
+    locale = str(
+        payload.get("locale")
+        or request.args.get("locale")
+        or request.headers.get("Accept-Language")
+        or ""
+    ).strip() or None
+    config = AppConfig.from_env()
+    return resolve_country(
+        config,
+        query=str(payload.get("query") or ""),
+        headers=_header_map(),
+        timezone=timezone,
+        locale=locale,
+    )
+
+
 @app.get("/")
 def index() -> Any:
-    return render_template("index.html", examples=EXAMPLE_QUERIES)
+    return render_template("index.html")
 
 
 @app.get("/api/health")
 def health() -> Any:
     return jsonify({"ok": True})
+
+
+@app.get("/api/geo")
+def api_geo() -> Any:
+    """Return the country implied by this device's time zone or IP."""
+    profile = _request_location()
+    return jsonify(
+        {
+            "country": profile.code,
+            "name": profile.name,
+            "currency": profile.currency,
+            "countries": [
+                {"code": item.code, "name": item.name, "currency": item.currency}
+                for item in list_countries()
+            ],
+        }
+    )
 
 
 @app.post("/api/search")
@@ -98,7 +129,8 @@ def api_search() -> Any:
     if len(query) > 200:
         return jsonify({"error": "Query is too long (max 200 characters)."}), 400
 
-    currency = str(payload.get("base_currency") or "AED").upper().strip()
+    profile = _request_location()
+    currency = str(payload.get("base_currency") or profile.currency).upper().strip()
     if currency not in ALLOWED_CURRENCIES:
         return jsonify({"error": f"Unsupported currency {currency}."}), 400
 
@@ -108,8 +140,15 @@ def api_search() -> Any:
         max_pages = 6
     max_pages = max(5, min(max_pages, 12))
 
-    config = web_config(query, currency, max_pages)
-    logger.info("Web search query=%r currency=%s backend=%s", query, currency, config.search_backend)
+    config = web_config(currency, max_pages, profile.code)
+    logger.info(
+        "Web search query=%r country=%s currency=%s backend=%s tz=%s",
+        query,
+        profile.code,
+        currency,
+        config.search_backend,
+        payload.get("time_zone"),
+    )
     try:
         picks = run_pipeline(query, config)
     except Exception as exc:

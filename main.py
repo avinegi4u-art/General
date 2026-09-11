@@ -11,8 +11,10 @@ from typing import Optional, Sequence
 from tabulate import tabulate
 
 from config import AppConfig, parse_weights
+from location import apply_country, country_from_query, country_from_system
 from models import ProductItem, RankedPicks
-from scraper import PageScraper
+from querying import missing_hard_required, missing_required, prefer_query_aware_title
+from scraper import PageScraper, items_from_hits
 from scoring import rank_items
 from search import search_web
 
@@ -43,7 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--base-currency",
         default=None,
-        help="Currency used for price comparison (default AED).",
+        help="Currency used for price comparison (default: the selected country's currency).",
+    )
+    parser.add_argument(
+        "--country",
+        default=None,
+        help="Shopper country code, e.g. AE, IN, US. Prefers local stores and sellers that ship there.",
     )
     parser.add_argument(
         "--weights",
@@ -79,7 +86,7 @@ def configure_logging(verbose: bool) -> None:
     logging.getLogger("primp").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     if verbose:
-        for name in ("search", "scraper", "scoring", "main"):
+        for name in ("search", "scraper", "scoring", "main", "location"):
             logging.getLogger(name).setLevel(logging.DEBUG)
 
 
@@ -88,12 +95,15 @@ def apply_cli_overrides(config: AppConfig, args: argparse.Namespace) -> AppConfi
         config.max_results = max(1, args.max_results)
     if args.max_pages is not None:
         config.max_pages = max(1, args.max_pages)
-    if args.base_currency:
-        config.base_currency = args.base_currency.upper()
     if args.weights:
         config.weights = parse_weights(args.weights)
     if args.backend:
         config.search_backend = args.backend.lower()
+    country_code = args.country or country_from_system() or country_from_query(args.query) or config.country_code
+    set_currency = args.base_currency is None
+    apply_country(config, country_code, set_currency=set_currency)
+    if args.base_currency:
+        config.base_currency = args.base_currency.upper()
     return config
 
 
@@ -133,13 +143,14 @@ def format_table(picks: RankedPicks) -> str:
         )
     for label, item in categories:
         if item is None:
-            rows.append([label, "—", "—", "—", "—", "—", "—"])
+            rows.append([label, "—", "—", "—", "—", "—", "—", "—"])
             continue
         rows.append(
             [
                 label,
                 _truncate(item.title, 48),
                 item.source_domain,
+                item.availability_label or item.availability,
                 _price_cell(item, picks.base_currency),
                 _rating_cell(item),
                 f"{item.scores.overall:.2f}",
@@ -149,17 +160,23 @@ def format_table(picks: RankedPicks) -> str:
 
     table = tabulate(
         rows,
-        headers=["Category", "Title", "Source", "Price", "Rating", "Overall", "Why / summary"],
+        headers=["Category", "Title", "Source", "Ships", "Price", "Rating", "Overall", "Why / summary"],
         tablefmt="github",
     )
     extra: list[str] = []
     extra.append(
-        "\nScores: overall = w_rel·relevance + w_price·price + w_rating·rating "
+        "\nScores: overall = w_rel·relevance + w_price·price + w_rating·rating + w_avail·availability "
         f"(weights {picks.weights}). Rating marked * used the neutral default."
     )
-    extra.append(f"Items considered: {len(picks.items)}. Base currency: {picks.base_currency}.")
+    extra.append(
+        f"Items considered: {len(picks.items)}. "
+        f"Country: {picks.country_name} ({picks.country_code}). "
+        f"Base currency: {picks.base_currency}."
+    )
     if picks.notes:
         extra.append("Notes: " + " ".join(picks.notes))
+    if picks.overview:
+        extra.insert(0, "Overview: " + picks.overview)
 
     detail_rows = []
     for item in picks.items[:8]:
@@ -167,11 +184,13 @@ def format_table(picks: RankedPicks) -> str:
             [
                 _truncate(item.title, 40),
                 item.source_domain,
+                item.availability,
                 _price_cell(item, picks.base_currency),
                 _rating_cell(item),
                 f"{item.scores.relevance:.2f}",
                 f"{item.scores.price:.2f}",
                 f"{item.scores.rating:.2f}",
+                f"{item.scores.availability:.2f}",
                 f"{item.scores.overall:.2f}",
                 f"{item.scores.value:.2f}",
             ]
@@ -183,11 +202,13 @@ def format_table(picks: RankedPicks) -> str:
             headers=[
                 "Title",
                 "Source",
+                "Avail",
                 "Price",
                 "Rating",
                 "Rel",
                 "PriceS",
                 "RateS",
+                "AvailS",
                 "Overall",
                 "Value",
             ],
@@ -196,24 +217,54 @@ def format_table(picks: RankedPicks) -> str:
     return table + "".join(f"\n{line}" for line in extra) + details
 
 
+def _merge_items(
+    primary: list[ProductItem], extra: list[ProductItem], query: str = ""
+) -> list[ProductItem]:
+    """Prefer scraped pages; keep snippet-only listings that were never fetched."""
+    by_url: dict[str, ProductItem] = {}
+    for item in extra:
+        key = item.url.split("#", 1)[0].rstrip("/")
+        by_url[key] = item
+    for item in primary:
+        key = item.url.split("#", 1)[0].rstrip("/")
+        existing = by_url.get(key)
+        if existing is None or item.scrape_ok or (item.price and not existing.price):
+            if query and existing is not None:
+                item.title = prefer_query_aware_title(query, item.title, existing.title)
+                if missing_required(query, item.title) and not missing_hard_required(
+                    query, existing.title
+                ):
+                    item.description = f"{existing.title}. {item.description}".strip()
+            by_url[key] = item
+    return list(by_url.values())
+
+
 def run(query: str, config: AppConfig) -> RankedPicks:
-    """Search → scrape → score → rank."""
+    """Search → hydrate snippets → scrape product pages → score → rank."""
     hits = search_web(query, config)
-    if not hits:
+    scraper = PageScraper(config)
+    try:
+        hits = scraper.expand_catalog_hits(hits, query)
+    except Exception as exc:  # noqa: BLE001 — catalog expansion must not fail the search
+        logger.warning("catalog expansion failed: %s", exc)
+    snippet_items = items_from_hits(query, hits, config)
+    if not hits and not snippet_items:
         logger.warning("No search results for %r", query)
         return RankedPicks(
             query=query,
             base_currency=config.base_currency,
+            country_code=config.country_code,
             items=[],
             notes=["Search returned no usable results."],
             weights={
                 "relevance": config.weights.relevance,
                 "price": config.weights.price,
                 "rating": config.weights.rating,
+                "availability": config.weights.availability,
             },
         )
-    scraper = PageScraper(config)
-    products = scraper.scrape_many(hits)
+    scraped = scraper.scrape_many(hits, query=query) if hits else []
+    products = _merge_items(scraped, snippet_items, query=query)
     return rank_items(products, query, config)
 
 

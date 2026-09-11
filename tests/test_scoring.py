@@ -52,6 +52,8 @@ def test_relevance_prefers_title_matches() -> None:
 
 def test_budget_in_base_aed() -> None:
     assert budget_in_base("wireless earbuds under 200 AED", "AED") == 200.0
+    assert budget_in_base("best e scooter under 10k aed", "AED") == 10000.0
+    assert budget_in_base("office chair under 10,000 AED", "AED") == 10000.0
 
 
 def test_best_price_excludes_unknown_and_irrelevant() -> None:
@@ -97,6 +99,7 @@ def test_json_payload_contains_categories() -> None:
     ]
     payload = rank_items(items, "wireless earbuds", config).to_dict()
     assert payload["items_considered"] == 2
+    assert payload["overview"]
     assert "best_price" in payload["categories"]
     assert "best_overall" in payload["categories"]
     assert "best_value" in payload["categories"]
