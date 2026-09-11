@@ -242,6 +242,11 @@ def _merge_items(
 def run(query: str, config: AppConfig) -> RankedPicks:
     """Search → hydrate snippets → scrape product pages → score → rank."""
     hits = search_web(query, config)
+    scraper = PageScraper(config)
+    try:
+        hits = scraper.expand_catalog_hits(hits, query)
+    except Exception as exc:  # noqa: BLE001 — catalog expansion must not fail the search
+        logger.warning("catalog expansion failed: %s", exc)
     snippet_items = items_from_hits(query, hits, config)
     if not hits and not snippet_items:
         logger.warning("No search results for %r", query)
@@ -258,7 +263,6 @@ def run(query: str, config: AppConfig) -> RankedPicks:
                 "availability": config.weights.availability,
             },
         )
-    scraper = PageScraper(config)
     scraped = scraper.scrape_many(hits, query=query) if hits else []
     products = _merge_items(scraped, snippet_items, query=query)
     return rank_items(products, query, config)

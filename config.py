@@ -88,6 +88,7 @@ PRODUCT_PATH_HINTS: tuple[str, ...] = (
     "/ip/",
     "/itm",
     "/item",
+    "/products/",
 )
 
 # Drop extracted amounts that are almost certainly years, ratings, or shipping crumbs.

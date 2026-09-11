@@ -8,7 +8,7 @@ import re
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Iterable
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
 
@@ -65,6 +65,23 @@ _CATEGORY_MARKERS = (
 )
 
 
+_TRACKING_QUERY_PARAMS = frozenset(
+    {"srsltid", "gclid", "fbclid", "mc_cid", "mc_eid", "gclsrc", "dclid"}
+)
+
+
+def canonicalize_url(url: str) -> str:
+    """Drop Google/Facebook tracking params so the same listing is not duplicated."""
+    parsed = urlparse(url)
+    kept = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key.lower() not in _TRACKING_QUERY_PARAMS and not key.lower().startswith("utm_")
+    ]
+    query = urlencode(kept, doseq=True)
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, query, ""))
+
+
 def looks_like_category_url(url: str) -> bool:
     """True for shop category, browse, and index pages — not a single listing."""
     parsed = urlparse(url)
@@ -72,6 +89,9 @@ def looks_like_category_url(url: str) -> bool:
     path_r = path.rstrip("/")
     last = path_r.rsplit("/", 1)[-1] if path_r else ""
     last = last.split(".")[0]
+    # Shopify product URLs live under /collections/brand/products/slug.
+    if re.search(r"/products/[^/]+", path) or "/dp/" in path or "/gp/product" in path:
+        return False
     if not path_r:
         return True
     if "product-category" in path or "product-tag" in path:
@@ -84,6 +104,30 @@ def looks_like_category_url(url: str) -> bool:
     if re.search(r"/c/[\w-]+", path) and "/dp/" not in path:
         return True
     return False
+
+
+def looks_like_brand_collection_url(url: str, query: str = "") -> bool:
+    """True for a shop catalog of the brand the shopper typed (/collections/vsett)."""
+    path = urlparse(url).path.lower().rstrip("/")
+    if re.search(r"/products/[^/]+", path):
+        return False
+    slug = ""
+    for prefix in ("/collections/", "/brand/"):
+        if prefix not in path:
+            continue
+        rest = path.split(prefix, 1)[1]
+        slug = rest.split("/")[0].replace("-", " ").strip()
+        break
+    if not slug or slug in {"all", "frontpage", "products", "scooters", "shop"}:
+        return False
+    if not query:
+        return True
+    from querying import required_terms
+
+    required = required_terms(query)
+    if not required:
+        return False
+    return any(term == slug or term in slug or slug in term for term in required)
 
 
 def looks_like_product_url(url: str) -> bool:
@@ -479,6 +523,7 @@ def _merge_hits(groups: Iterable[list[SearchResult]]) -> list[SearchResult]:
     unique: list[SearchResult] = []
     for group in groups:
         for hit in group:
+            hit.url = canonicalize_url(hit.url)
             key = hit.url.split("#", 1)[0].rstrip("/")
             if not key or key in seen:
                 continue
@@ -490,7 +535,12 @@ def _merge_hits(groups: Iterable[list[SearchResult]]) -> list[SearchResult]:
 def search_marketplace_sites(query: str, config: AppConfig) -> list[SearchResult]:
     """Fan out site-restricted searches so local stores are not missed."""
     from location import get_country, marketplace_site_queries
-    from querying import product_core_query, required_terms, shopping_followup_queries
+    from querying import (
+        product_core_query,
+        required_terms,
+        shopping_followup_queries,
+        wants_electric_scooter,
+    )
 
     country = get_country(config.country_code)
     # Negatives like -kit hide amazon.ae product pages. Site searches use brand+model only.
@@ -499,6 +549,11 @@ def search_marketplace_sites(query: str, config: AppConfig) -> list[SearchResult
     req = required_terms(query)
     if req and country.local_domains:
         queries.insert(0, f'"{" ".join(req)}" site:{country.local_domains[0]}')
+    if wants_electric_scooter(query) or req:
+        for domain in country.specialty_domains:
+            site_q = f"{core} site:{domain}"
+            if site_q not in queries:
+                queries.append(site_q)
     queries.extend(shopping_followup_queries(query, country.search_terms[0]))
     if not queries:
         return []
@@ -540,6 +595,31 @@ def search_marketplace_sites(query: str, config: AppConfig) -> list[SearchResult
             except TimeoutError:
                 logger.warning("marketplace searches timed out")
     return extra
+
+
+def seeded_specialty_catalogs(query: str, config: AppConfig) -> list[SearchResult]:
+    """Direct brand catalogs on known local shops, so DDG does not have to find them."""
+    from location import get_country
+    from querying import required_terms
+
+    country = get_country(config.country_code)
+    req = required_terms(query)
+    if not req:
+        return []
+    brand = req[0]
+    if not re.fullmatch(r"[a-z][a-z0-9]+", brand):
+        return []
+    hits: list[SearchResult] = []
+    for domain in country.specialty_domains:
+        hits.append(
+            SearchResult(
+                title=f"{brand} electric scooters",
+                url=f"https://www.{domain}/collections/{brand}",
+                snippet=f"Shop {brand} in {country.name}",
+                source_domain=domain,
+            )
+        )
+    return hits
 
 
 def search_web(query: str, config: AppConfig) -> list[SearchResult]:
@@ -584,7 +664,7 @@ def search_web(query: str, config: AppConfig) -> list[SearchResult]:
     except Exception as exc:  # noqa: BLE001 — extras must not fail the whole search
         logger.warning("marketplace searches failed: %s", exc)
 
-    unique = _merge_hits([hits, extra])
+    unique = _merge_hits([hits, extra, seeded_specialty_catalogs(query, config)])
     if len(unique) < 8:
         try:
             expanded = expand_shopper_query(query)
@@ -601,8 +681,10 @@ def search_web(query: str, config: AppConfig) -> list[SearchResult]:
         key=lambda hit: (
             not hit_is_plausible(query, hit.title, hit.snippet, hit.url),
             len(missing_required(query, f"{hit.title} {hit.url}")),
-            not looks_like_product_url(hit.url),
-            looks_like_category_url(hit.url),
+            not looks_like_product_url(hit.url)
+            and not looks_like_brand_collection_url(hit.url, query),
+            looks_like_category_url(hit.url)
+            and not looks_like_brand_collection_url(hit.url, query),
             {"local": 0, "ships": 1, "unknown": 2, "foreign": 3}[
                 classify_listing(hit.url, hit.source_domain, country).kind
             ],
@@ -619,4 +701,8 @@ def search_web(query: str, config: AppConfig) -> list[SearchResult]:
         buyable_n,
         country.code,
     )
-    return unique[: config.max_results]
+    capped = unique[: config.max_results]
+    for hit in unique[config.max_results :]:
+        if looks_like_brand_collection_url(hit.url, query):
+            capped.append(hit)
+    return capped

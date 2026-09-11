@@ -38,6 +38,7 @@ class CountryProfile:
     extra_ships_domains: tuple[str, ...] = ()
     example_queries: tuple[str, ...] = ()
     google_hl: str = "en"
+    specialty_domains: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -223,9 +224,11 @@ def _ae() -> CountryProfile:
             "dubaiscooters.ae",
             "whizz.ae",
             "naveetech.ae",
+            "e-scooteruaehub.com",
         ),
         local_tlds=(".ae",),
         path_hints=("/uae", "/ae/", "/en-ae", "/en_ae"),
+        specialty_domains=("e-scooteruaehub.com", "whizz.ae", "dubaiscooters.ae"),
         example_queries=(
             "best e scooter under 10k aed",
             "wireless earbuds under 200 AED",

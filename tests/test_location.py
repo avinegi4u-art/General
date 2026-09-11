@@ -20,8 +20,14 @@ def test_local_uae_storefronts() -> None:
     ae = get_country("AE")
     noon = classify_listing("https://www.noon.com/uae-en/earbuds", "noon.com", ae)
     amazon_ae = classify_listing("https://www.amazon.ae/dp/B0TEST", "amazon.ae", ae)
+    hub = classify_listing(
+        "https://www.e-scooteruaehub.com/collections/vsett/products/vsett-8-electric-scooter",
+        "e-scooteruaehub.com",
+        ae,
+    )
     assert noon.kind == "local"
     assert amazon_ae.kind == "local"
+    assert hub.kind == "local"
     assert "United Arab Emirates" in noon.label
 
 
@@ -238,3 +244,29 @@ def test_other_country_listings_are_not_a_uae_fallback() -> None:
     assert urls == []
     assert picks.best_overall is None
     assert any("other countries" in note.lower() for note in picks.notes)
+
+
+def test_rank_vsett_from_uae_hub_over_unrelated() -> None:
+    config = AppConfig()
+    config.country_code = "AE"
+    hub = ProductItem(
+        title="VSETT 10 APEX Electric Scooter 60V 25.6Ah 1500W Dual motor",
+        url="https://www.e-scooteruaehub.com/collections/vsett/products/vsett-10-apex-electric-scooter-60v-2-8ah-1500w-dual-motor",
+        source_domain="e-scooteruaehub.com",
+        description="VSETT 10 APEX electric scooter",
+        price=PriceInfo(amount=9390, currency="AED", original_text="AED 9390", amount_base=9390),
+        rating=4.5,
+    )
+    mudguard = ProductItem(
+        title="Mudguard compatible with VSETT 10+",
+        url="https://www.amazon.ae/mudguard",
+        source_domain="amazon.ae",
+        description="spare mudguard for vsett",
+        price=PriceInfo(amount=35, currency="AED", original_text="AED 35", amount_base=35),
+        rating=4.9,
+    )
+    picks = rank_items([mudguard, hub], "vsett scooter buy", config)
+    assert picks.best_overall is not None
+    assert picks.best_overall.source_domain == "e-scooteruaehub.com"
+    assert picks.best_price is not None
+    assert picks.best_price.source_domain == "e-scooteruaehub.com"

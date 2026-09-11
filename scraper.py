@@ -7,7 +7,9 @@ import logging
 import random
 import re
 import time
+from urllib.parse import urljoin
 from typing import Any, Optional
+
 import requests
 from bs4 import BeautifulSoup, Tag
 
@@ -20,7 +22,14 @@ from querying import (
     missing_required,
     prefer_query_aware_title,
 )
-from search import domain_from_url, looks_like_category_url, looks_like_product_url
+from search import (
+    canonicalize_url,
+    domain_from_url,
+    looks_like_brand_collection_url,
+    looks_like_category_url,
+    looks_like_product_url,
+    _merge_hits,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -434,6 +443,38 @@ def extract_from_html(
     )
 
 
+def product_hits_from_collection(
+    html: str, page_url: str, query: str
+) -> list[SearchResult]:
+    """Pull buyable product URLs off a brand catalog page."""
+    soup = BeautifulSoup(html, "lxml")
+    hits: list[SearchResult] = []
+    seen: set[str] = set()
+    for tag in soup.select("a[href]"):
+        href = canonicalize_url(urljoin(page_url, tag.get("href") or ""))
+        if not looks_like_product_url(href):
+            continue
+        title = tag.get_text(" ", strip=True) or ""
+        slug = href.replace("-", " ").replace("/", " ")
+        if missing_hard_required(query, f"{title} {slug}"):
+            continue
+        key = href.split("#", 1)[0].rstrip("/")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        if len(title) < 4:
+            title = key.rsplit("/", 1)[-1].replace("-", " ")
+        hits.append(
+            SearchResult(
+                title=title,
+                url=href,
+                snippet=title,
+                source_domain=domain_from_url(href),
+            )
+        )
+    return hits
+
+
 class PageScraper:
     """Fetch product pages with timeouts, retries, and polite delays."""
 
@@ -522,10 +563,33 @@ class PageScraper:
             error=error,
         )
 
+    def expand_catalog_hits(self, hits: list[SearchResult], query: str) -> list[SearchResult]:
+        """Turn a local /collections/vsett page into the scooters sold on it."""
+        extra: list[SearchResult] = []
+        for hit in hits:
+            if not looks_like_brand_collection_url(hit.url, query):
+                continue
+            logger.info("Expanding brand catalog %s", hit.url)
+            html, error = self.fetch(hit.url)
+            if not html:
+                logger.info("Catalog fetch failed for %s: %s", hit.url, error)
+                continue
+            found = product_hits_from_collection(html, hit.url, query)
+            logger.info("Catalog %s yielded %d product listing(s)", hit.url, len(found))
+            extra.extend(found)
+        if not extra:
+            return hits
+        return _merge_hits([hits, extra])
+
     def scrape_many(self, hits: list[SearchResult], query: str = "") -> list[ProductItem]:
         """Scrape up to ``max_pages`` product pages, skipping shop indexes."""
         items: list[ProductItem] = []
-        product_hits = [hit for hit in hits if not looks_like_category_url(hit.url)]
+        product_hits = [
+            hit
+            for hit in hits
+            if looks_like_product_url(hit.url)
+            or not looks_like_category_url(hit.url)
+        ]
         if len(product_hits) < 3:
             product_hits = list(hits)
         if query:
@@ -557,7 +621,8 @@ def items_from_hits(query: str, hits: list[SearchResult], config: AppConfig) -> 
     items: list[ProductItem] = []
     for hit in hits:
         if looks_like_category_url(hit.url) and not looks_like_product_url(hit.url):
-            continue
+            if not looks_like_brand_collection_url(hit.url, query):
+                continue
         if not hit_is_plausible(query, hit.title, hit.snippet, hit.url):
             continue
         blob = f"{hit.title} {hit.snippet}"
