@@ -55,6 +55,14 @@ def test_product_url_heuristic() -> None:
         + "?srsltid=AfmBOop-QtEaZZE0NuUUd1gGn6pkz2XwQboG_R0CYIAJ4JYppQTDmQd5"
     )
     assert canonicalize_url(tracked) == collection
+    nested = (
+        "https://www.e-scooteruaehub.com/collections/vsett/products/"
+        "vsett-8-electric-scooter"
+    )
+    assert (
+        canonicalize_url(nested)
+        == "https://www.e-scooteruaehub.com/products/vsett-8-electric-scooter"
+    )
 
 
 def test_vsett_collection_html_yields_product_listings() -> None:

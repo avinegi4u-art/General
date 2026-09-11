@@ -71,15 +71,16 @@ _TRACKING_QUERY_PARAMS = frozenset(
 
 
 def canonicalize_url(url: str) -> str:
-    """Drop Google/Facebook tracking params so the same listing is not duplicated."""
+    """Drop tracking params and Shopify collection prefixes so listings are unique."""
     parsed = urlparse(url)
+    path = re.sub(r"/collections/[^/]+(/products/)", r"\1", parsed.path, flags=re.I)
     kept = [
         (key, value)
         for key, value in parse_qsl(parsed.query, keep_blank_values=True)
         if key.lower() not in _TRACKING_QUERY_PARAMS and not key.lower().startswith("utm_")
     ]
     query = urlencode(kept, doseq=True)
-    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, query, ""))
+    return urlunparse((parsed.scheme, parsed.netloc, path, parsed.params, query, ""))
 
 
 def looks_like_category_url(url: str) -> bool:
