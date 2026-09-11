@@ -219,7 +219,7 @@ def rank_items(
 
     preferred = [item for item in pool if is_buyable(item.availability)]
     unknown = [item for item in pool if item.availability == "unknown"]
-    if len(preferred) >= 3:
+    if preferred:
         catalogue = preferred
         dropped = len(pool) - len(preferred)
         if dropped:

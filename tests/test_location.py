@@ -50,6 +50,51 @@ def test_country_subdomain_is_not_treated_as_local() -> None:
     assert uae.kind == "local"
 
 
+def test_us_storefront_tld_is_foreign_for_uae() -> None:
+    ae = get_country("AE")
+    us_brand = classify_listing(
+        "https://www.naveetech.us/products/navee-gt3",
+        "naveetech.us",
+        ae,
+    )
+    amazon_ae = classify_listing(
+        "https://www.amazon.ae/NAVEE-Electric-Scooter/dp/B0TEST",
+        "amazon.ae",
+        ae,
+    )
+    assert us_brand.kind == "foreign"
+    assert amazon_ae.kind == "local"
+
+
+def test_rank_amazon_ae_over_us_brand_site() -> None:
+    config = AppConfig()
+    config.country_code = "AE"
+    amazon = ProductItem(
+        title="NAVEE GT3 Pro Electric Scooter for Adults, 60KM Max",
+        url="https://www.amazon.ae/NAVEE-Electric-Scooter/dp/B0TEST",
+        source_domain="amazon.ae",
+        description="NAVEE GT3 Pro electric scooter",
+        price=PriceInfo(amount=1619, currency="AED", original_text="AED 1619", amount_base=1619),
+        rating=4.4,
+        review_count=12,
+    )
+    us_site = ProductItem(
+        title="NAVEE GT3 | Commuter Electric Scooter",
+        url="https://www.naveetech.us/products/gt3",
+        source_domain="naveetech.us",
+        description="NAVEE GT3 electric scooter",
+        price=PriceInfo(amount=419.99, currency="USD", original_text="$419.99", amount_base=1541),
+        rating=4.7,
+        review_count=118,
+    )
+    picks = rank_items([us_site, amazon], "navee gt3 electric scooter buy", config)
+    urls = [pick.item.url for pick in picks.answers if pick.item]
+    assert urls
+    assert all("naveetech.us" not in url for url in urls)
+    assert picks.best_overall is not None
+    assert picks.best_overall.source_domain == "amazon.ae"
+
+
 def test_us_amazon_is_foreign_for_uae() -> None:
     ae = get_country("AE")
     listing = classify_listing("https://www.amazon.com/dp/B0TEST", "amazon.com", ae)
@@ -80,9 +125,10 @@ def test_localize_and_marketplace_queries() -> None:
     assert localize_query("noise cancelling headphones", ae) == "noise cancelling headphones UAE"
     assert localize_query("earbuds under 200 AED", ae) == "earbuds under 200 AED"
     queries = marketplace_site_queries("wireless earbuds", ae)
-    assert any("site:amazon.ae" in row for row in queries)
+    assert any(row == "wireless earbuds site:amazon.ae" for row in queries)
     assert any("site:noon.com" in row for row in queries)
     assert any("site:aliexpress.com" in row for row in queries)
+    assert not any(" OR " in row for row in queries)
 
 
 def test_ranking_prefers_local_over_cheaper_foreign() -> None:

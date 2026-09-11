@@ -31,6 +31,13 @@ def test_catalog_queries_search_named_scooters() -> None:
     assert "crony" in blob
 
 
+def test_brand_query_searches_local_market() -> None:
+    queries = catalog_search_queries("navee gt3 electric scooter buy", "UAE")
+    blob = " ".join(queries).lower()
+    assert "navee gt3" in blob
+    assert "uae" in blob
+
+
 def test_spec_collision_watts_and_ohms() -> None:
     query = "best e scooter under 10k aed"
     assert spec_collides_with_budget(query, "10000W Dual Motor Electric Scooter")

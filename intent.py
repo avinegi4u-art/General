@@ -124,11 +124,12 @@ def parse_intent(query: str, default_currency: str = "AED") -> QueryIntent:
 def catalog_search_queries(query: str, country_term: str) -> list[str]:
     """Named-model searches, the shopping-index equivalent of a knowledge graph."""
     intent = parse_intent(query)
+    place = country_term.strip()
+    if intent.brand_terms:
+        quoted = " ".join(intent.brand_terms)
+        return [f'"{quoted}" {place}'.strip(), f'"{quoted}" buy {place}'.strip()]
     if not intent.category or not intent.category.popular:
         return []
-    if intent.brand_terms:
-        return []
-    place = country_term.strip()
     queries: list[str] = []
     for name in intent.category.popular[:5]:
         queries.append(f'"{name}" {place}'.strip())

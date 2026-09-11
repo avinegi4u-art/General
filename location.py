@@ -106,6 +106,30 @@ MARKETPLACE_HOME: dict[str, str] = {
     "noon.com": "AE",
 }
 
+# Public suffixes that name a country. Generic .com is not a country.
+COUNTRY_TLDS: tuple[tuple[str, str], ...] = (
+    (".co.uk", "GB"),
+    (".com.au", "AU"),
+    (".co.in", "IN"),
+    (".co.jp", "JP"),
+    (".com.sa", "SA"),
+    (".ae", "AE"),
+    (".us", "US"),
+    (".uk", "GB"),
+    (".in", "IN"),
+    (".de", "DE"),
+    (".fr", "FR"),
+    (".ca", "CA"),
+    (".au", "AU"),
+    (".sa", "SA"),
+    (".eg", "EG"),
+    (".pk", "PK"),
+    (".qa", "QA"),
+    (".kw", "KW"),
+    (".bh", "BH"),
+    (".om", "OM"),
+)
+
 # Sites that serve several countries from one domain; path decides locality.
 PATH_COUNTRY_SITES: dict[str, tuple[tuple[str, str], ...]] = {
     "noon.com": (("/uae", "AE"), ("/saudi", "SA"), ("/egypt", "EG"), ("/bahrain", "BH")),
@@ -194,6 +218,8 @@ def _ae() -> CountryProfile:
             "mi.com",
             "buytronics.ae",
             "dubaiscooters.ae",
+            "whizz.ae",
+            "naveetech.ae",
         ),
         local_tlds=(".ae",),
         path_hints=("/uae", "/ae/", "/en-ae", "/en_ae"),
@@ -692,6 +718,14 @@ def _kind_label(kind: AvailabilityKind, country: CountryProfile) -> str:
     return "Availability unclear"
 
 
+def _tld_country(host: str) -> Optional[str]:
+    """Return a country code when the domain uses a country public suffix (.ae, .us)."""
+    for suffix, code in COUNTRY_TLDS:
+        if host.endswith(suffix):
+            return code
+    return None
+
+
 def _subdomain_country(host: str) -> Optional[str]:
     """Return a country code when the leftmost label is a country storefront."""
     first = host.split(".")[0]
@@ -730,7 +764,13 @@ def classify_listing(url: str, source_domain: str, country: CountryProfile) -> L
         elif home and home != country.code:
             kind = "foreign"
         else:
-            kind = "unknown"
+            tld_code = _tld_country(host)
+            if tld_code == country.code:
+                kind = "local"
+            elif tld_code and tld_code != country.code:
+                kind = "foreign"
+            else:
+                kind = "unknown"
 
     return ListingAvailability(
         kind=kind,
@@ -756,9 +796,8 @@ def localize_query(query: str, country: CountryProfile) -> str:
 
 
 def marketplace_site_queries(query: str, country: CountryProfile) -> list[str]:
-    """Two targeted searches: local stores, then AliExpress-style ship-to-you sellers."""
-    local = " OR ".join(f"site:{domain}" for domain in country.local_domains[:4])
-    queries = [f"{query} ({local})"]
+    """One search per local store so amazon.ae is not lost in a giant OR-query."""
+    queries = [f"{query} site:{domain}" for domain in country.local_domains[:3]]
     ships = country.extra_ships_domains[:1] or ("aliexpress.com",)
     queries.append(f"{query} site:{ships[0]}")
     return queries
