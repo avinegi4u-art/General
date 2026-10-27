@@ -95,6 +95,39 @@ def test_search_returns_five_picks() -> None:
     assert len(payload["picks"]) == 5
 
 
+def test_search_passes_the_buy_through() -> None:
+    from app import app
+    from models import LabeledPick
+
+    item = ProductItem(
+        title="Demo Wireless Earbuds",
+        url="https://noon.com/demo",
+        source_domain="noon.com",
+        price=PriceInfo(amount=149, currency="AED", original_text="AED 149", amount_base=149),
+        rating=4.4,
+        scores=ScoreBreakdown(overall=0.8),
+    )
+    picks = RankedPicks(
+        query="wireless earbuds",
+        base_currency="AED",
+        items=[item],
+        answers=[LabeledPick("best_overall", "Best match", "mix", item)],
+        decision={
+            "verdict": {"headline": "Buy Demo Wireless Earbuds from noon.com", "url": item.url},
+            "checks": [{"id": "price", "status": "pass", "label": "Price is on the page"}],
+            "rows": [{"id": "best_overall", "label": "Best match", "is_buy": True}],
+            "spread": "Lowest price in this shortlist.",
+            "same_title": "",
+            "hold": "",
+        },
+    )
+    with patch("app.run_pipeline", return_value=picks):
+        response = app.test_client().post("/api/search", json={"query": "wireless earbuds"})
+    payload = response.get_json()
+    assert payload["decision"]["verdict"]["headline"].startswith("Buy Demo")
+    assert payload["decision"]["checks"][0]["status"] == "pass"
+
+
 def test_geo_uses_device_timezone() -> None:
     from app import app
 

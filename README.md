@@ -89,6 +89,20 @@ Default weights: relevance `0.38`, price `0.20`, rating `0.22`, availability `0.
 - **Rating** — `stars / 5`. Missing ratings use a neutral default of **3.5/5** (shown with `*` in the table).
 - **Availability** — sold in your country scores highest, then sellers that ship to you (AliExpress and similar), then unknown sites, then other-country storefronts.
 
+## The buy
+
+The five roles stay (match, price, value, rating, and one more). On top of them, FindBest names **one listing to buy** and writes the tradeoff for every other row: how much money you save or spend versus that buy, the star gap when both pages show a rating, and delivery. If another shortlisted page has a near-identical title at a different price, that gap is called out on its own.
+
+The buy also runs five checks:
+
+- price is printed on the page
+- stars are printed on the page (a missing rating stays a 3.5/5 stand-in, marked as such)
+- review count, with a warning under 20 reviews
+- sold in your country, ships there, or delivery unclear
+- inside the budget when the query states one
+
+A missing price is left missing. The link goes to the listing; FindBest does not place the order.
+
 **Best value** is quality per unit of (log) price:
 
 ```

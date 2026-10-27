@@ -149,6 +149,150 @@ body {
   text-decoration: underline;
 }
 
+.verdict {
+  grid-column: 1 / -1;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 22px 22px 18px;
+  box-shadow: var(--shadow);
+}
+
+.eyebrow,
+.kicker {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.verdict h2,
+.row-card h3 {
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1.25;
+  margin: 8px 0;
+}
+
+.verdict h2 {
+  font-size: clamp(1.5rem, 3vw, 2.15rem);
+}
+
+.verdict-price {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--price);
+  margin: 0 0 8px;
+}
+
+.reason,
+.edge {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.hold {
+  margin: 0 0 8px;
+  color: #7a2a12;
+  font-weight: 700;
+}
+
+.spread,
+.same-title,
+.meta,
+.facts {
+  color: var(--muted);
+}
+
+.spread,
+.same-title,
+.meta {
+  margin: 10px 0 0;
+}
+
+.checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  margin: 14px 0 0;
+  list-style: none;
+}
+
+.check {
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+}
+
+.check .mark {
+  font-weight: 800;
+  margin-right: 4px;
+}
+
+.check.pass {
+  background: #e5f4ef;
+  color: #0f6e5b;
+}
+
+.check.warn {
+  background: #fff1d6;
+  color: #6b4c1e;
+}
+
+.check.fail {
+  background: #f8d7cc;
+  color: #7a2a12;
+}
+
+.shortlist {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 12px;
+}
+
+.row-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+}
+
+.row-card.is-buy {
+  outline: 2px solid var(--ink);
+}
+
+.row-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.row-card .price {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.facts {
+  margin: 8px 0 0;
+  font-size: 0.92rem;
+}
+
+.view {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.working {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

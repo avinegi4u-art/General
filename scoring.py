@@ -7,6 +7,7 @@ from statistics import median
 from typing import Optional
 
 from config import AppConfig, ScoreWeights
+from decision import build_decision
 from intent import (
     build_overview,
     popular_model_bonus,
@@ -27,7 +28,7 @@ from querying import (
     required_terms,
     tokenize,
 )
-from search import looks_like_category_url
+from search import looks_like_category_url, looks_like_index_page
 
 
 def relevance_score(query: str, item: ProductItem, base_currency: str = "AED") -> float:
@@ -91,6 +92,9 @@ def relevance_score(query: str, item: ProductItem, base_currency: str = "AED") -
         score = min(score, 0.14) * 0.3
     elif spec_collides_with_budget(query, blob):
         # “10000W scooter” is not a 10000 AED budget match.
+        score = min(score, 0.16) * 0.35
+    elif looks_like_index_page(item.url, item.title) and not looks_like_category_url(item.url):
+        # Short department slugs ("/wireless-earbuds/") are not a product to buy.
         score = min(score, 0.16) * 0.35
     elif looks_like_category_url(item.url):
         # A shop index is not a product to buy.
@@ -345,7 +349,7 @@ def rank_items(
     also_consider = next((pick.item for pick in answers if pick.key.startswith("also")), None)
     overview = build_overview(query, country.name, config.base_currency, answers)
 
-    return RankedPicks(
+    ranked = RankedPicks(
         query=query,
         base_currency=config.base_currency,
         country_code=country.code,
@@ -366,6 +370,8 @@ def rank_items(
         },
         notes=notes,
     )
+    ranked.decision = build_decision(ranked)
+    return ranked
 
 
 def _build_answers(
