@@ -83,6 +83,71 @@ def canonicalize_url(url: str) -> str:
     return urlunparse((parsed.scheme, parsed.netloc, path, parsed.params, query, ""))
 
 
+_INDEX_TITLE = re.compile(
+    r"(?:"
+    r"\b(?:shop|buy)\b.{0,100}\bat best price\b"
+    r"|"
+    r"\bbest price in\b"
+    r"|"
+    r"^(?:shop|buy)\b.{0,140}\b(?:in|at)\s+(?:the\s+)?"
+    r"(?:uae|u\.a\.e\.?|dubai|abu dhabi|india|ksa|saudi|online)\b"
+    r")",
+    re.I,
+)
+_DEPARTMENT_WORDS = frozenset(
+    {
+        "wireless",
+        "earbuds",
+        "earbud",
+        "earphones",
+        "earphone",
+        "headphones",
+        "headphone",
+        "scooter",
+        "scooters",
+        "electric",
+        "office",
+        "chair",
+        "chairs",
+        "bluetooth",
+        "audio",
+        "speaker",
+        "speakers",
+        "phone",
+        "phones",
+        "laptop",
+        "laptops",
+    }
+)
+def _path_parts(url: str) -> list[str]:
+    path = urlparse(url).path.lower().strip("/")
+    return [part for part in path.split("/") if part]
+
+
+def looks_like_index_page(url: str, title: str = "") -> bool:
+    """True for a department or shop index, including short slugs like /wireless-earbuds/."""
+    if looks_like_category_url(url):
+        return True
+    if looks_like_product_url(url):
+        return False
+    parts = _path_parts(url)
+    if len(parts) > 2:
+        return False
+    if len(parts) == 1:
+        tokens = set(parts[0].replace("-", " ").replace("_", " ").split())
+        if tokens and tokens <= _DEPARTMENT_WORDS:
+            return True
+    if not title or _title_has_model(title):
+        return False
+    return bool(_INDEX_TITLE.search(title))
+
+
+def _title_has_model(title: str) -> bool:
+    from querying import is_modelish_term, tokenize
+
+    return any(is_modelish_term(term) for term in tokenize(title))
+
+
 def looks_like_category_url(url: str) -> bool:
     """True for shop category, browse, and index pages — not a single listing."""
     parsed = urlparse(url)

@@ -28,7 +28,7 @@ from querying import (
     required_terms,
     tokenize,
 )
-from search import looks_like_category_url
+from search import looks_like_category_url, looks_like_index_page
 
 
 def relevance_score(query: str, item: ProductItem, base_currency: str = "AED") -> float:
@@ -92,6 +92,9 @@ def relevance_score(query: str, item: ProductItem, base_currency: str = "AED") -
         score = min(score, 0.14) * 0.3
     elif spec_collides_with_budget(query, blob):
         # “10000W scooter” is not a 10000 AED budget match.
+        score = min(score, 0.16) * 0.35
+    elif looks_like_index_page(item.url, item.title) and not looks_like_category_url(item.url):
+        # Short department slugs ("/wireless-earbuds/") are not a product to buy.
         score = min(score, 0.16) * 0.35
     elif looks_like_category_url(item.url):
         # A shop index is not a product to buy.

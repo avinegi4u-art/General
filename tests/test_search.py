@@ -4,8 +4,29 @@ from search import (
     is_skippable_url,
     looks_like_brand_collection_url,
     looks_like_category_url,
+    looks_like_index_page,
     looks_like_product_url,
 )
+
+
+def test_department_slugs_are_index_pages() -> None:
+    assert looks_like_index_page(
+        "https://uae.sharafdg.com/wireless-earbuds/",
+        "Shop Wireless Earbuds at Best Price in Dubai – Sharaf DG UAE",
+    )
+    assert looks_like_index_page(
+        "https://as2.ae/earphones/",
+        "Buy Earphones & Wireless Earbuds in UAE",
+    )
+    assert not looks_like_index_page(
+        "https://www.noon.com/uae-en/huawei-freebuds-pro-5/N70336708V/p/",
+        "HUAWEI FreeBuds Pro 5 Wireless Earbuds",
+    )
+    assert not looks_like_index_page(
+        "https://uae.sharafdg.com/product/earbuds",
+        "Anker Soundcore Wireless Earbuds",
+    )
+    assert not looks_like_index_page("https://www.amazon.ae/dp/B0ABCDEF", "Wireless Earbuds")
 
 
 def test_domain_from_url_strips_www() -> None:

@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from models import LabeledPick, ProductItem, RankedPicks
 from querying import budget_in_base
+from search import looks_like_index_page
 
 _PRICE_INTENT = re.compile(r"\b(cheapest|lowest price|best price|cheap)\b", re.I)
 _RATED_INTENT = re.compile(r"\b(best rated|highest rated|top rated)\b", re.I)
@@ -46,7 +47,13 @@ _TITLE_STOP = frozenset(
 
 def build_decision(picks: RankedPicks) -> dict[str, Any]:
     """Return the buy, the evidence checks, and a tradeoff for every shortlisted row."""
-    answers = [pick for pick in picks.answers if pick.item is not None]
+    answers = [
+        pick
+        for pick in picks.answers
+        if pick.item is not None and not looks_like_index_page(pick.item.url, pick.item.title)
+    ]
+    if not answers:
+        return {"verdict": None, "checks": [], "rows": [], "spread": "", "same_title": "", "hold": ""}
     buy = _select_buy(picks, answers)
     if buy is None or buy.item is None:
         return {"verdict": None, "checks": [], "rows": [], "spread": "", "same_title": "", "hold": ""}
@@ -68,8 +75,8 @@ def build_decision(picks: RankedPicks) -> dict[str, Any]:
         "verdict": {
             "pick_id": buy.key,
             "label": buy.label,
-            "title": item.title,
-            "headline": f"Buy {_short_title(item.title)} from {item.source_domain}",
+            "title": _display_title(item.title),
+            "headline": f"Buy {_display_title(item.title)} from {item.source_domain}",
             "reason": _reason(picks.query, buy, item, cheapest, picks.country_name, currency),
             "url": item.url,
             "source": item.source_domain,
@@ -325,7 +332,7 @@ def _row(pick: LabeledPick, buy: LabeledPick, currency: str) -> dict[str, Any]:
     return {
         "id": pick.key,
         "label": pick.label,
-        "title": item.title,
+        "title": _display_title(item.title),
         "url": item.url,
         "source": item.source_domain,
         "price_display": item.price.format(currency) if item.price else "Price not on the page",
@@ -401,11 +408,15 @@ def _rating_display(item: ProductItem) -> str:
     return f"{item.rating:.1f}/5"
 
 
-def _short_title(title: str) -> str:
+def _display_title(title: str) -> str:
+    """First product name, splitting store separators and titles glued together."""
     short = _TITLE_SPLIT.split(title, maxsplit=1)[0].strip()
     short = re.sub(r"\s+", " ", short)
-    if len(short) > 72:
-        return short[:71].rstrip() + "…"
+    pieces = re.split(r"(?<=[a-z])(?=[A-Z])", short)
+    if len(pieces) > 1 and len(pieces[0].strip()) >= 24:
+        short = pieces[0].strip()
+    if len(short) > 90:
+        return short[:89].rstrip() + "…"
     return short
 
 

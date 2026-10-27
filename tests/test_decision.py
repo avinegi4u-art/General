@@ -115,6 +115,53 @@ def test_near_identical_title_calls_out_the_cheaper_store() -> None:
         assert "more" in note
 
 
+def test_department_page_does_not_win_the_buy() -> None:
+    config = AppConfig()
+    items = [
+        _item(
+            "Shop Wireless Earbuds at Best Price in Dubai",
+            "https://uae.sharafdg.com/wireless-earbuds/",
+            "uae.sharafdg.com",
+            30,
+            4.8,
+            reviews=10,
+        ),
+        _item(
+            "Huawei FreeBuds Pro 5 Wireless Earbuds",
+            "https://www.noon.com/uae-en/huawei-freebuds-pro-5/N1/p/",
+            "noon.com",
+            145,
+            4.5,
+            reviews=80,
+        ),
+    ]
+    picks = rank_items(items, "wireless earbuds under 200 AED", config)
+    assert picks.decision["verdict"]["url"].endswith("/p/")
+    assert "sharafdg" not in picks.decision["verdict"]["url"]
+    assert all("sharafdg" not in row["url"] for row in picks.decision["rows"])
+
+
+def test_glued_titles_show_the_first_product_name() -> None:
+    config = AppConfig()
+    picks = rank_items(
+        [
+            _item(
+                "WF1000XM5 Truewireless Noise Cancelling Earbuds BlackSony WF-1000XM5 The Best",
+                "https://www.noon.com/uae-en/wf1000xm5/N1/p/",
+                "noon.com",
+                129,
+                4.4,
+                reviews=40,
+            )
+        ],
+        "wireless earbuds",
+        config,
+    )
+    headline = picks.decision["verdict"]["headline"]
+    assert headline.startswith("Buy WF1000XM5 Truewireless Noise Cancelling Earbuds Black from noon.com")
+    assert "Sony WF-1000XM5 The Best" not in headline
+
+
 def test_empty_shortlist_has_no_verdict() -> None:
     picks = RankedPicks(query="wireless earbuds", base_currency="AED", items=[])
     assert build_decision(picks)["verdict"] is None

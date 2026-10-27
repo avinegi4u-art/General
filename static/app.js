@@ -152,8 +152,12 @@ async function runSearch(query) {
     if (data.error && !data.picks) {
       throw new Error(data.error);
     }
-    picksEl.innerHTML = renderDecision(data);
-    picksEl.hidden = !picksEl.innerHTML.trim();
+    const html = renderDecision(data);
+    if (!html.trim()) {
+      throw new Error(data.error || "No single product to buy. Try a more specific query.");
+    }
+    picksEl.innerHTML = html;
+    picksEl.hidden = false;
   } catch (err) {
     show(errorEl, err.message || "Search failed");
     picksEl.hidden = true;
