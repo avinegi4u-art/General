@@ -127,6 +127,7 @@ class RankedPicks:
     overview: str = ""
     weights: dict[str, float] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    decision: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         def item_or_none(item: Optional[ProductItem]) -> Optional[dict[str, Any]]:
@@ -141,6 +142,7 @@ class RankedPicks:
             "items_considered": len(self.items),
             "notes": self.notes,
             "overview": self.overview,
+            "decision": self.decision,
             "categories": {
                 "best_price": item_or_none(self.best_price),
                 "best_overall": item_or_none(self.best_overall),

@@ -7,6 +7,7 @@ from statistics import median
 from typing import Optional
 
 from config import AppConfig, ScoreWeights
+from decision import build_decision
 from intent import (
     build_overview,
     popular_model_bonus,
@@ -345,7 +346,7 @@ def rank_items(
     also_consider = next((pick.item for pick in answers if pick.key.startswith("also")), None)
     overview = build_overview(query, country.name, config.base_currency, answers)
 
-    return RankedPicks(
+    ranked = RankedPicks(
         query=query,
         base_currency=config.base_currency,
         country_code=country.code,
@@ -366,6 +367,8 @@ def rank_items(
         },
         notes=notes,
     )
+    ranked.decision = build_decision(ranked)
+    return ranked
 
 
 def _build_answers(

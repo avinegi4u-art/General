@@ -177,6 +177,26 @@ def format_table(picks: RankedPicks) -> str:
         extra.append("Notes: " + " ".join(picks.notes))
     if picks.overview:
         extra.insert(0, "Overview: " + picks.overview)
+    verdict = (picks.decision or {}).get("verdict") or {}
+    if verdict:
+        decision_lines = [f"Buy: {verdict.get('headline', '')}", str(verdict.get("reason") or "")]
+        for check in (picks.decision or {}).get("checks") or []:
+            mark = {"pass": "ok", "warn": "check", "fail": "no"}.get(check.get("status"), "-")
+            decision_lines.append(f"  [{mark}] {check.get('label', '')}")
+        hold = (picks.decision or {}).get("hold") or ""
+        if hold:
+            decision_lines.append("Hold: " + hold)
+        spread = (picks.decision or {}).get("spread") or ""
+        if spread:
+            decision_lines.append(spread)
+        same_title = (picks.decision or {}).get("same_title") or ""
+        if same_title:
+            decision_lines.append(same_title)
+        for row in (picks.decision or {}).get("rows") or []:
+            if row.get("is_buy"):
+                continue
+            decision_lines.append(f"{row.get('label')}: {row.get('edge')}")
+        extra.insert(0, "\n".join(decision_lines))
 
     detail_rows = []
     for item in picks.items[:8]:
